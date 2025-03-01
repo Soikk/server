@@ -28,10 +28,10 @@
 #endif
 
 
-enum http_method {
+typedef enum http_method {
 	GET, HEAD, OPTIONS, TRACE,
 	DELETE, PUT, POST, PATCH
-};
+} http_method;
 
 
 
@@ -45,18 +45,18 @@ enum mime_type {
 
 
 struct uri {
-	struct str path;
-	struct str query;
+	str path;
+	str query;
 };
 
 struct uri_mod {
-	struct str pattern;
+	str pattern;
 	struct uri output;
 };
 
 struct header {
-	struct str name;
-	struct str value;
+	str name;
+	str value;
 };
 
 #define MAX_HEADERS 16
@@ -64,24 +64,24 @@ struct header {
 
 struct http_message {
 	union {
-		struct str method;
-		struct str resp_ver;
+		str method;
+		str resp_ver;
 	};
 	union {
-		struct str uri;
-		struct str status;
+		str uri;
+		str status;
 	};
 	union {
-		struct str req_ver;
-		struct str reason;
+		str req_ver;
+		str reason;
 	};
 	int hlen;
 	struct header headers[MAX_HEADERS];
-	struct str body;
+	str body;
 };
 
 typedef struct http_server {
-	struct str port;
+	str port;
 	int backlog;
 	int ssocket;
 } http_server;
@@ -105,11 +105,11 @@ typedef struct http_worker {
 	(hm).headers[(hm).hlen++] = (h)
 
 
-http_server *setup_http_server(struct str port, int backlog);
+http_server *setup_http_server(str port, int backlog);
 
 void destroy_http_server(http_server **hs);
 
-http_worker *setup_http_worker(int ssocket, int secure, struct str certfile, struct str keyfile);
+http_worker *setup_http_worker(int ssocket, int secure, str certfile, str keyfile);
 
 void destroy_http_worker(http_worker **hw);
 
@@ -117,19 +117,19 @@ void reset_worker_ssl(http_worker *hw);
 
 int accept_connection(http_worker *hw, char ip[INET_ADDRSTRLEN]);
 
-int receive_request(http_worker *hw, struct str *request);
+int receive_request(http_worker *hw, str *request);
 
-struct file generate_resource(struct uri resource, struct str url);
+struct file generate_resource(struct uri resource, str url);
 
 char *handlePOST(char *request);
 
 void build_http_message(char *request, int len, struct http_message *hm);
 
-enum http_method get_http_method(struct str method);
+enum http_method get_http_method(str method);
 
-struct uri sanitize_uri(struct str uri);
+struct uri sanitize_uri(str uri);
 
-void send_file(http_worker *hw, struct str filename);
+void send_file(http_worker *hw, str filename);
 
 int read_uri_rewrites(char *map, uint64_t size);
 

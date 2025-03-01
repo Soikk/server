@@ -1,15 +1,20 @@
 #include "net.h"
 
 
-struct str response_headers[] = {
+enum header_enum {
+	CONTENT_LENGTH,
+	CONTENT_TYPE,
+	TRANSFER_ENCODING
+};
+str response_headers[] = {
 	sstr("Content-Length"),
 	sstr("Content-Type"),
 	sstr("Transfer-Encoding"),
 };
 
 struct {
-	struct str fmt;
-	struct str type;
+	str fmt;
+	str type;
 } mime_types[] = {
 	{.fmt = sstr("avif"), .type = sstr("image/avif")},
 	{.fmt = sstr("bmp"), .type = sstr("image/bmp")},
@@ -66,7 +71,7 @@ static int pleasesslgivemetheerror(int ssl_get_error){
 	return ssl_get_error;
 }
 
-http_server *setup_http_server(struct str port, int backlog){
+http_server *setup_http_server(str port, int backlog){
 	http_server *hs = calloc(1, sizeof(http_server));
 	hs->port = dup_str(port);
 	hs->backlog = backlog;
@@ -118,7 +123,7 @@ void destroy_http_server(http_server **hs){
 	}
 }
 
-http_worker *setup_http_worker(int ssocket, int secure, struct str certfile, struct str keyfile){
+http_worker *setup_http_worker(int ssocket, int secure, str certfile, str keyfile){
 	http_worker *hw = calloc(1, sizeof(http_worker));
 	hw->ssocket = ssocket;
 	hw->csocket = -1;
@@ -131,6 +136,11 @@ http_worker *setup_http_worker(int ssocket, int secure, struct str certfile, str
 	// need to compile openssl with ktls on for this (v) to work
 	SSL_CTX_set_options(hw->ssl_ctx, SSL_OP_ENABLE_KTLS);
 	if(hw->ssl_ctx == NULL){
+		goto error;
+	}
+	//SSL_CTX_set_verify(hw->ssl_ctx, SSL_VERIFY_PEER, NULL);
+	if(SSL_CTX_load_verify_locations(hw->ssl_ctx, "ssl/mkarchive.net/ca_bundle.crt", NULL) <= 0){
+		log_error("ca_bundle.crt");
 		goto error;
 	}
 	if(SSL_CTX_use_certificate_file(hw->ssl_ctx, certfile.ptr, SSL_FILETYPE_PEM) <= 0){
@@ -200,13 +210,13 @@ int accept_connection(http_worker *hw, char ip[INET_ADDRSTRLEN]){
 	return 0;
 }
 
-static inline int worker_read(http_worker *hw, struct str *buf){
+static inline int worker_read(http_worker *hw, str *buf){
 	return hw->secure ?
 		SSL_read(hw->ssl, buf->ptr+buf->len, buf->cap-buf->len) :
 		recv(hw->csocket, buf->ptr+buf->len, buf->cap-buf->len, 0);
 }
 
-int receive_request(http_worker *hw, struct str *request){
+int receive_request(http_worker *hw, str *request){
 	// for some reason SSL_has_pending can return 0 but we can still read data
 	struct pollfd pfd[1] = { {.fd = hw->csocket, .events = POLLIN } };
 	while((hw->secure && SSL_has_pending(hw->ssl)) || poll(pfd, 1, 0)){
@@ -229,19 +239,19 @@ int receive_request(http_worker *hw, struct str *request){
 	return 0;
 }
 
-struct file generate_resource(struct uri resource, struct str url){
+struct file generate_resource(struct uri resource, str url){
 	struct file file = {0};
 	/*
-		generate if both of these are true
+		generate if all of these are true
 		1) no file specified (aka we need index.html)
 		2) theres an index.html.php
 		3) index.html isnt cached (future)
 	*/
-	struct str phpfile = nstr(resource.path.len + slen(".php"));
+	str phpfile = dnstr(resource.path.len + slen(".php"));
 	copy_strs(phpfile, resource.path, sstr(".php"));
 	if(access(phpfile.ptr, F_OK) == 0){
 		// we need a str_copy or something
-		struct str command = nstr(
+		str command = dnstr(
 			slen("REQUEST_URI='") + resource.path.len + slen("' QUERY_STRING='") + resource.query.len +
 			slen("' URL='") + url.len +
 			slen("' php -c ./ ") + phpfile.len + slen(" > ") + resource.path.len
@@ -265,11 +275,11 @@ struct file generate_resource(struct uri resource, struct str url){
 			return file;
 		}
 
-		struct str pid = utostr(getpid(), 10);
+		str pid = utostr(getpid(), 10);
 		file.name.ptr = calloc(uri.path.len + pid.len + 1, sizeof(char));
 		copy_strs(file.name, uri.path, pid);
 
-		struct str command = {0};
+		str command = {0};
 		command.ptr = calloc(
 			slen("REQUEST_URI='") + uri.path.len + slen("' REQUEST_QUERY='") + uri.query.len +
 			slen("' php -c ./ ") + uri.path.len + slen(" > ") + file.name.len,
@@ -294,7 +304,7 @@ struct file generate_resource(struct uri resource, struct str url){
 }
 
 // TODO: REVISE; return 201/204
-char *handlePOST(char *request/*struct str uri, struct str body*/){
+char *handlePOST(char *request/*str uri, str body*/){
 /*
 	char *resource = malloc(1), *uri = getURI(request), *params = getPOSTParams(request);
 
@@ -364,7 +374,7 @@ void build_http_message(char *request, int rlen, struct http_message *hm){
 }
 
 // TODO: check if endianness affects this
-__attribute__ ((optimize(3))) enum http_method get_http_method(struct str method){
+__attribute__ ((optimize(3))) http_method get_http_method(str method){
 	uint64_t m;
 	memmove(&m, method.ptr, sizeof(uint64_t));
 	if(((m & 0x0000000000FFFFFF) - 0x0000000000544547) == 0){
@@ -388,8 +398,8 @@ static uint64_t http_len(struct http_message *hm){
 	return len;
 }
 
-/*static struct str assemble_with_body(struct http_message *hm, FILE *body, uint64_t len){
-	struct str s = {0};
+/*static str assemble_with_body(struct http_message *hm, FILE *body, uint64_t len){
+	str s = {0};
 	s.ptr = calloc(http_len(hm) + len + 1, sizeof(char));
 	copy_strs(s, hm->method, sstr(" "), hm->uri, sstr(" "), hm->req_ver, sstr("\r\n"));
 
@@ -405,8 +415,8 @@ static uint64_t http_len(struct http_message *hm){
 	return s;
 }*/
 
-static struct str http_header_to_str(struct http_message *hm){
-	struct str s = {0};
+static str http_header_to_str(struct http_message *hm){
+	str s = {0};
 	s.ptr = calloc(http_len(hm) + 1, sizeof(char));
 	copy_strs(s, hm->method, sstr(" "), hm->uri, sstr(" "), hm->req_ver, sstr("\r\n"));
 	for(int i = 0; i < hm->hlen; i++){
@@ -438,19 +448,19 @@ static struct str http_header_to_str(struct http_message *hm){
 		to the output if the token number 3 in the array exists (has length > 0)
 		All other characters get outputted normally
 */
-static struct uri uri_rewrite(struct str p, struct str u, struct uri o){
+static struct uri uri_rewrite(str p, str u, struct uri o){
 	int i = 0, j = 0, in = 0, ti = 0;
-	struct str tokens[9] = {0};
+	str tokens[9] = {0};
 	for(; j < p.len; i += 1){
 		if(i < u.len && p.ptr[j+in] == '<' && p.ptr[j+in+1] == u.ptr[i]){
-			if(ti < 9) tokens[ti++] = (struct str){.ptr = u.ptr+i, .len = 1};
+			if(ti < 9) tokens[ti++] = (str){.ptr = u.ptr+i, .len = 1};
 			j += 3+in, in = 0;
 		}else if(i < u.len && (p.ptr[j+in] == '^' || p.ptr[j+in] == u.ptr[i])){
-			if(p.ptr[j] == '^' && ti < 9) tokens[ti++] = (struct str){.ptr = u.ptr+i, .len = 1};
+			if(p.ptr[j] == '^' && ti < 9) tokens[ti++] = (str){.ptr = u.ptr+i, .len = 1};
 			j += 1+in, in = 0;
 		}else if(i < u.len && p.ptr[j] == '*'){
 			if(!in){
-				if(ti < 9) tokens[ti++] = (struct str){.ptr = u.ptr+i, .len = 0};
+				if(ti < 9) tokens[ti++] = (str){.ptr = u.ptr+i, .len = 0};
 				in = 1;
 			}
 			if(ti-in < 9) tokens[ti-in].len++;
@@ -463,7 +473,7 @@ static struct uri uri_rewrite(struct str p, struct str u, struct uri o){
 	if(i < u.len) return (struct uri){0};
 
 	struct uri r = {0};
-	struct str *no = &o.path, *nr = &r.path;
+	str *no = &o.path, *nr = &r.path;
 	for(int k = 0, rlen = 0; k < 2; k++, no = &o.query, nr = &r.query){
 		for(int i = 0; i < no->len; i++, rlen++){
 			if(no->ptr[i] == '$') rlen += tokens[no->ptr[++i]-'1'].len-1;
@@ -491,8 +501,8 @@ static struct uri uri_rewrite(struct str p, struct str u, struct uri o){
 	return r;
 }
 
-struct uri sanitize_uri(struct str uri){
-	struct str suri = {.ptr = calloc(uri.len+1, sizeof(char)), .len = 0};
+struct uri sanitize_uri(str uri){
+	str suri = {.ptr = calloc(uri.len+1, sizeof(char)), .len = 0};
 	if(suri.ptr == NULL) return (struct uri){0};
 	int i = 0, o = 0;
 	while(i+o < uri.len){
@@ -517,13 +527,13 @@ struct uri sanitize_uri(struct str uri){
 	}
 	free_str(&suri);
 	if(u.path.len == 0){
-		u.path = str("localc/404/index.html");
+		u.path = dstr("localc/404/index.html");
 		free_str(&u.query);
 	}
 	return u;
 }
 
-static inline int worker_write(http_worker *hw, struct str buf){
+static inline int worker_write(http_worker *hw, str buf){
 	return hw->secure ?
 		SSL_write(hw->ssl, buf.ptr, buf.len) :
 		send(hw->csocket, buf.ptr, buf.len, 0);
@@ -534,7 +544,7 @@ static inline int worker_write(http_worker *hw, struct str buf){
 // Because this copying is done within the kernel, sendfile() is
 // more efficient than the combination of read(2) and write(2),
 // which would require transferring data to and from user space."
-void send_file(http_worker *hw, struct str filename){
+void send_file(http_worker *hw, str filename){
 	log_info("requested '%.*s' -> ", filename.len, filename.ptr);
 	uint64_t fsize = get_file_size(filename.ptr);
 	if(fsize == 0){
@@ -545,7 +555,7 @@ void send_file(http_worker *hw, struct str filename){
 	log_info("sending '%.*s'", filename.len, filename.ptr);
 
 	enum mime_type type = TXT;
-	struct str fmt = get_file_format(filename);
+	str fmt = get_file_format(filename);
 	for(int i = 0; i < sizeof(mime_types)/sizeof(mime_types[0]); i++){
 		if(strncmp(fmt.ptr, mime_types[i].fmt.ptr, fmt.len) == 0){
 			type = i;
@@ -563,7 +573,7 @@ void send_file(http_worker *hw, struct str filename){
 		.body = {0},
 	};
 
-	struct str header = http_header_to_str(&hm);
+	str header = http_header_to_str(&hm);
 	free_str(&hm.headers[1].value);
 	int sent = worker_write(hw, header);
 	if(sent != header.len){
@@ -588,7 +598,7 @@ void send_file(http_worker *hw, struct str filename){
 		// 	sendfile(socket, fd, NULL, fsize);
 
 		// we're ignoring MAX_BODY_SIZE
-		struct str fuckcygwinineedsendfile;
+		str fuckcygwinineedsendfile;
 		fd_to_str(&fuckcygwinineedsendfile, fd, fsize);
 		sent = worker_write(hw, fuckcygwinineedsendfile);
 		free_str(&fuckcygwinineedsendfile);

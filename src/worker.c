@@ -8,7 +8,7 @@
 
 ipc_listener *listener;
 http_worker *worker;
-struct str rewritesfile;
+str rewritesfile;
 
 
 int init(char *argv[]){
@@ -16,11 +16,8 @@ int init(char *argv[]){
 	// reinit
 	// finish
 	// toggle ssl
-	//log_set_level(LOG_DEBUG, 0);
-	//log_set_level(LOG_INFO, 0);
-	//log_set_level(LOG_WARN, 0);
 
-	struct str saddr = str(argv[1]);
+	str saddr = dstr(argv[1]);
 	listener = setup_ipc_listener(saddr);
 	free_str(&saddr);
 	if(listener == NULL){
@@ -32,7 +29,7 @@ int init(char *argv[]){
 	ipc_message msg = receive_ipc_message(listener);
 	int ssocket = strtou(msg.val);
 	free_ipc_message(msg);	// v configurable certificate locations?
-	worker = setup_http_worker(ssocket, 1, sstr("ssl/cert.pem"), sstr("ssl/key.pem"));
+	worker = setup_http_worker(ssocket, 1, sstr("ssl/mkarchive.net/certificate.crt"), sstr("ssl/mkarchive.net/private.key"));
 	if(worker == NULL){
 		log_error("setting up http worker");
 		return 1;
@@ -76,7 +73,7 @@ int main(int argc, char **argv){
 	log_info("init'd");
 
 	bool end = false;
-	struct str request = {.cap = 8192, .len = 0, .ptr = alloca(8192)};
+	str request = {.cap = 8192, .len = 0, .ptr = alloca(8192)};
 	while(!end){
 		char cip[INET_ADDRSTRLEN] = {0};
 		return_value = accept_connection(worker, cip);

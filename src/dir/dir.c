@@ -24,19 +24,19 @@ uint64_t get_file_size(char *filename){
 	return 0;
 }
 
-struct str get_file_format(struct str filename){
+str get_file_format(str filename){
 	int i = 0;
 	while(filename.len-i > 0){
 		if(filename.ptr[filename.len-i-1] == '.') break;
 		i++;
 	}
 	if(i == 0 || i == filename.len){
-		return ((struct str){0});
+		return ((str){0});
 	}
-	struct str fmt;
+	str fmt;
 	fmt.len = i;
 	fmt.ptr = calloc(fmt.len+1, sizeof(char));
-	if(fmt.ptr == NULL) return ((struct str){0});
+	if(fmt.ptr == NULL) return ((str){0});
 	memcpy(fmt.ptr, filename.ptr+filename.len-i, fmt.len);
 	return fmt;
 }

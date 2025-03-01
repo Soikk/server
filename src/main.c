@@ -10,8 +10,8 @@
 
 #define BACKLOG 15
 
-struct str ipcaddr = sstr(".ipcserver");
-struct str port;
+str ipcaddr = sstr(".ipcserver");
+str port;
 http_server *server;
 ipc_sender *sender;
 struct worker {
@@ -76,6 +76,8 @@ void show_commands(void){
 		"q: quit\n"
 	);
 }
+
+#include "crc64/crc64.h"
 
 int main(int argc, char *argv[]){
 

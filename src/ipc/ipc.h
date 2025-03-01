@@ -14,25 +14,25 @@
 
 
 typedef struct ipc_sender {
-	struct str addr;
+	str addr;
 	int ssocket;
 } ipc_sender;
 
 typedef struct ipc_listener {
-	struct str saddr;
+	str saddr;
 	int csocket;
 } ipc_listener;
 
 #define MAX_IPC_MSG_LEN 1024
 typedef struct ipc_message {
-	struct str key;
-	struct str val;
+	str key;
+	str val;
 } ipc_message;
 
-ipc_sender *setup_ipc_sender(struct str addr, int backlog);
+ipc_sender *setup_ipc_sender(str addr, int backlog);
 void destroy_ipc_sender(ipc_sender **is);
 
-ipc_listener *setup_ipc_listener(struct str saddr);
+ipc_listener *setup_ipc_listener(str saddr);
 void destroy_ipc_listener(ipc_listener **il);
 
 void free_ipc_message(ipc_message im);

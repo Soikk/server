@@ -16,7 +16,7 @@
 
 
 struct file {
-	struct str name;
+	str name;
 	bool temp;
 };
 
@@ -27,7 +27,7 @@ uint64_t get_fp_size(FILE *fp);
 
 uint64_t get_file_size(char *filename);
 
-struct str get_file_format(struct str filename);
+str get_file_format(str filename);
 
 uint64_t getNEntries(const char *dir);
 
