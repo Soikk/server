@@ -20,6 +20,7 @@ struct {
 	{.fmt = sstr("bmp"), .type = sstr("image/bmp")},
 	{.fmt = sstr("css"), .type = sstr("text/css")},
 	{.fmt = sstr("csv"), .type = sstr("text/csv")},
+	{.fmt = sstr("eot"), .type = sstr("application/vnd.ms-fontobject")},
 	{.fmt = sstr("gz"), .type = sstr("application/gzip")},
 	{.fmt = sstr("gif"), .type = sstr("image/gif")},
 	{.fmt = sstr("html"), .type = sstr("text/html")},
@@ -36,13 +37,17 @@ struct {
 	{.fmt = sstr("pdf"), .type = sstr("application/pdf")},
 	{.fmt = sstr("php"), .type = sstr("application/x-httpd-php")},
 	{.fmt = sstr("rar"), .type = sstr("application/vnd.rar")},
+	{.fmt = sstr("svg"), .type = sstr("image/svg+xml")},
 	{.fmt = sstr("tiff"), .type = sstr("image/tiff")},
 	{.fmt = sstr("ts"), .type = sstr("video/mp2t")},
+	{.fmt = sstr("ttf"), .type = sstr("font/ttf")},
 	{.fmt = sstr("txt"), .type = sstr("text/plain")},
 	{.fmt = sstr("wav"), .type = sstr("audio/wav")},
 	{.fmt = sstr("weba"), .type = sstr("audio/webm")},
 	{.fmt = sstr("webm"), .type = sstr("video/webm")},
 	{.fmt = sstr("webp"), .type = sstr("image/webp")},
+	{.fmt = sstr("woff"), .type = sstr("font/woff")},
+	{.fmt = sstr("woff2"), .type = sstr("font/woff2")},
 	{.fmt = sstr("xml"), .type = sstr("application/xml")},
 	{.fmt = sstr("zip"), .type = sstr("application/zip")},
 	{.fmt = sstr("7z"), .type = sstr("application/x-7z-compressed")},
@@ -128,38 +133,13 @@ http_worker *setup_http_worker(int ssocket, int secure, str certfile, str keyfil
 	hw->ssocket = ssocket;
 	hw->csocket = -1;
 	hw->secure = secure;
-	hw->receive = recv;
-	hw->ssl_receive = SSL_read;
 
-	SSL_library_init();
-	hw->ssl_ctx = SSL_CTX_new(TLS_server_method());
-	// need to compile openssl with ktls on for this (v) to work
-	SSL_CTX_set_options(hw->ssl_ctx, SSL_OP_ENABLE_KTLS);
-	if(hw->ssl_ctx == NULL){
-		goto error;
-	}
-	//SSL_CTX_set_verify(hw->ssl_ctx, SSL_VERIFY_PEER, NULL);
-	if(SSL_CTX_load_verify_locations(hw->ssl_ctx, "ssl/mkarchive.net/ca_bundle.crt", NULL) <= 0){
-		log_error("ca_bundle.crt");
-		goto error;
-	}
-	if(SSL_CTX_use_certificate_file(hw->ssl_ctx, certfile.ptr, SSL_FILETYPE_PEM) <= 0){
-		log_error("worker_cert");
-		goto error;
-	}
-	if(SSL_CTX_use_PrivateKey_file(hw->ssl_ctx, keyfile.ptr, SSL_FILETYPE_PEM) <= 0 ){
-		log_error("worker: key");
-		goto error;
-	}
-	hw->ssl = SSL_new(hw->ssl_ctx);
-	SSL_set_accept_state(hw->ssl);
-	if(hw->ssl == NULL){
-		goto error;
-	}
-
-	if(0){
-error:
-		destroy_http_worker(&hw);
+	if(secure){
+		if(setup_https(hw, certfile, keyfile) != 0){
+			log_error("Setting up HTTPS");
+			terminate_https(hw);
+			destroy_http_worker(&hw);
+		}
 	}
 
 	return hw;
@@ -169,21 +149,82 @@ void destroy_http_worker(http_worker **hw){
 	if(*hw != NULL){
 		(*hw)->ssocket = -1;
 		close((*hw)->csocket);
+		(*hw)->csocket = -1;
 		(*hw)->secure = 0;
-		SSL_free((*hw)->ssl);
-		SSL_CTX_free((*hw)->ssl_ctx);
-		(*hw)->receive = NULL;
-		(*hw)->ssl_receive = NULL;
+		terminate_https(*hw);
 		free(*hw);
 		*hw = NULL;
 	}
 }
 
-void reset_worker_ssl(http_worker *hw){
-	close(hw->csocket);
-	SSL_free(hw->ssl);
+int setup_https(http_worker *hw, str certfile, str keyfile){
+	if(certfile.len == 0){
+		log_error("Missing certificate file");
+		return 1;
+	}
+	if(keyfile.len == 0){
+		log_error("Missing private key file");
+		return 1;
+	}
+
+	if(hw->ssl != NULL){
+		SSL_free(hw->ssl);
+	}
+	if(hw->ssl_ctx != NULL){
+		SSL_CTX_free(hw->ssl_ctx);
+	}
+
+	hw->ssl_ctx = SSL_CTX_new(TLS_server_method());
+	// need to compile openssl with ktls on for this (v) to work
+	SSL_CTX_set_options(hw->ssl_ctx, SSL_OP_ENABLE_KTLS | SSL_OP_IGNORE_UNEXPECTED_EOF);
+	if(hw->ssl_ctx == NULL){
+		return 1;
+	}
+	//SSL_CTX_set_verify(hw->ssl_ctx, SSL_VERIFY_PEER, NULL);
+	if(SSL_CTX_load_verify_locations(hw->ssl_ctx, "ssl/mkarchive.net/ca_bundle.crt", NULL) <= 0){
+		log_error("Verifying certificate locations");
+		return 1;
+	}
+	if(SSL_CTX_use_certificate_file(hw->ssl_ctx, certfile.ptr, SSL_FILETYPE_PEM) <= 0){
+		log_error("Using certificate file");
+		return 1;
+	}
+	if(SSL_CTX_use_PrivateKey_file(hw->ssl_ctx, keyfile.ptr, SSL_FILETYPE_PEM) <= 0 ){
+		log_error("Using private key file");
+		return 1;
+	}
 	hw->ssl = SSL_new(hw->ssl_ctx);
+	if(hw->ssl == NULL){
+		log_error("Creating SSL*");
+		return 1;
+	}
 	SSL_set_accept_state(hw->ssl);
+
+	return 0;
+}
+
+void reset_https(http_worker *hw){
+	if(hw != NULL){
+		close(hw->csocket);
+		if(hw->ssl != NULL){
+			SSL_free(hw->ssl);
+		}
+		hw->ssl = SSL_new(hw->ssl_ctx);
+		SSL_set_accept_state(hw->ssl);
+	}
+}
+
+void terminate_https(http_worker *hw){
+	if(hw != NULL){
+		if(hw->ssl != NULL){
+			SSL_free(hw->ssl);
+			hw->ssl = NULL;
+		}
+		if(hw->ssl_ctx != NULL){
+			SSL_CTX_free(hw->ssl_ctx);
+			hw->ssl_ctx = NULL;
+		}
+	}
 }
 
 int accept_connection(http_worker *hw, char ip[INET_ADDRSTRLEN]){

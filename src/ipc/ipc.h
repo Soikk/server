@@ -23,11 +23,23 @@ typedef struct ipc_listener {
 	int csocket;
 } ipc_listener;
 
+typedef enum ipc_type {
+	NONE,
+	SOCKET, REWRITES, // do away with these?
+	CERT, KEY,
+	RESTART,
+	RELOAD,
+	HTTP,
+	HTTPS,
+	LOG,
+	UNLOG,
+} ipc_type;
+
 #define MAX_IPC_MSG_LEN 1024
-typedef struct ipc_message {
-	str key;
-	str val;
-} ipc_message;
+typedef struct ipc_msg {
+	ipc_type type;
+	str msg;
+} ipc_msg;
 
 ipc_sender *setup_ipc_sender(str addr, int backlog);
 void destroy_ipc_sender(ipc_sender **is);
@@ -35,8 +47,8 @@ void destroy_ipc_sender(ipc_sender **is);
 ipc_listener *setup_ipc_listener(str saddr);
 void destroy_ipc_listener(ipc_listener **il);
 
-void free_ipc_message(ipc_message im);
-int send_ipc_message(int to, ipc_message msg);
-ipc_message receive_ipc_message(ipc_listener *il);
+int send_ipc_message(int to, ipc_type type, str msg);
+ipc_msg receive_ipc_message(ipc_listener *il);
+void free_ipc_message(ipc_msg *im);
 
 #endif

@@ -86,16 +86,12 @@ typedef struct http_server {
 	int ssocket;
 } http_server;
 
-typedef ssize_t (*recv_func)(int,void*,size_t,int);
-typedef int (*ssl_recv_func)(SSL*,void*,int);
 typedef struct http_worker {
 	int ssocket;
 	int csocket;
 	int secure;
 	SSL_CTX *ssl_ctx;
 	SSL *ssl;
-	recv_func receive;
-	ssl_recv_func ssl_receive;
 } http_worker;
 
 #define MAX_RESPONSE_SIZE 0x0FFFFFFF
@@ -106,14 +102,14 @@ typedef struct http_worker {
 
 
 http_server *setup_http_server(str port, int backlog);
-
 void destroy_http_server(http_server **hs);
 
 http_worker *setup_http_worker(int ssocket, int secure, str certfile, str keyfile);
-
 void destroy_http_worker(http_worker **hw);
 
-void reset_worker_ssl(http_worker *hw);
+int setup_https(http_worker *hw, str certfile, str keyfile);
+void reset_https(http_worker *hw);
+void terminate_https(http_worker *hw);
 
 int accept_connection(http_worker *hw, char ip[INET_ADDRSTRLEN]);
 

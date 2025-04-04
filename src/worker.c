@@ -8,9 +8,56 @@
 
 ipc_listener *listener;
 http_worker *worker;
+int secure;
 str rewritesfile;
+str certfile;
+str keyfile;
 
 
+void handle_message(ipc_msg im){
+	switch(im.type){
+		case NONE: break;
+		case SOCKET:
+			if(worker != NULL){
+				destroy_http_worker(&worker);
+			}
+			int ssocket = strtou(im.msg);
+			worker = setup_http_worker(ssocket, secure, certfile, keyfile);
+			break;
+		case REWRITES:
+			break;
+		case CERT:
+			free_str(&certfile);
+			certfile = dup_str(im.msg);
+			break;
+		case KEY:
+			free_str(&keyfile);
+			keyfile = dup_str(im.msg);
+			break;
+		case RESTART:
+			char *args[] = {"./worker.exe", listener.saddr.ptr, NULL};
+			execv("./worker.exe", args);
+			log_error("Cannot restart worker: %s", strerror(errno));
+			return 1;
+			break;
+		case RELOAD:
+			// re-reads config
+			break;
+		case HTTP:
+			secure = 0;
+			terminate_https(worker);
+			break;
+		case HTTPS:
+			secure = 1;
+			setup_https(worker, certfile, keyfile);
+		case LOG:
+			break;
+		case UNLOG:
+			break;
+		default:
+			break;
+	}
+}
 int init(char *argv[]){
 	// replace signals with unix sockets
 	// reinit
@@ -26,9 +73,13 @@ int init(char *argv[]){
 	}
 
 	// check key for value maybe idk
-	ipc_message msg = receive_ipc_message(listener);
-	int ssocket = strtou(msg.val);
-	free_ipc_message(msg);	// v configurable certificate locations?
+	ipc_msg msg = receive_ipc_message(listener);
+	if(msg.type != SOCKET){
+		log_error("uh oh");
+		return 1;
+	}
+	int ssocket = strtou(msg.msg);
+	free_ipc_message(&msg);	// v configurable certificate locations?
 	worker = setup_http_worker(ssocket, 1, sstr("ssl/mkarchive.net/certificate.crt"), sstr("ssl/mkarchive.net/private.key"));
 	if(worker == NULL){
 		log_error("setting up http worker");
@@ -36,8 +87,12 @@ int init(char *argv[]){
 	}
 	// this is disgusting and should be done elsewhere
 	msg = receive_ipc_message(listener); // check for value
-	rewritesfile = dup_str(msg.val);
-	free_ipc_message(msg);
+	if(msg.type != REWRITES){
+		log_error("uh oh 2");
+		return 1;
+	}
+	rewritesfile = dup_str(msg.msg);
+	free_ipc_message(&msg);
 	int fsize = get_file_size(rewritesfile.ptr);
 	int fd = open(rewritesfile.ptr, O_RDONLY | O_NONBLOCK);
 	char *rewrites = mmap(NULL, fsize, PROT_READ, MAP_SHARED, fd, 0);
@@ -50,6 +105,7 @@ int init(char *argv[]){
 		return 1;
 	}
 	munmap(rewritesfile.ptr, fsize);
+	close(fd);
 
 	return 0;
 }
@@ -81,7 +137,7 @@ int main(int argc, char **argv){
 			case -1: // couldnt accept, do something ig
 				continue;
 			case SSL_ERROR_SSL:
-				reset_worker_ssl(worker);
+				reset_https(worker);
 				log_info("continuing\n");
 				continue;
 		}
@@ -91,7 +147,7 @@ int main(int argc, char **argv){
 			case -1: // couldnt accept, do something ig
 				continue;
 			case SSL_ERROR_SSL:
-				reset_worker_ssl(worker);
+				reset_https(worker);
 				log_info("continuing\n");
 				continue;
 		}
@@ -119,7 +175,9 @@ int main(int argc, char **argv){
 			case PUT:
 				break;
 			case DELETE:
-				break;		
+				break;
+			default:
+				break;
 		}
 		free_str(&suri.path);
 		free_str(&suri.query);

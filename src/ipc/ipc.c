@@ -73,71 +73,57 @@ void destroy_ipc_listener(ipc_listener **il){
 	}
 }
 
-void free_ipc_message(ipc_message im){
-	free_str(&im.key);
-	free_str(&im.val);
-}
-
-static inline str ipc_message_to_str(ipc_message msg){
-	str smsg = dnstr(msg.key.len + msg.val.len + 2*sizeof(u32));
-	memcpy(smsg.ptr+smsg.len, &msg.key.len, sizeof(msg.key.len));
-	smsg.len += sizeof(msg.key.len);
-	copy_str(smsg, msg.key);
-	memcpy(smsg.ptr+smsg.len, &msg.val.len, sizeof(msg.val.len));
-	smsg.len += sizeof(msg.val.len);
-	copy_str(smsg, msg.val);
-	return smsg;
-}
-
-int send_ipc_message(int to, ipc_message msg){
-	str smsg = ipc_message_to_str(msg);
-	if(send(to, smsg.ptr, smsg.len, 0) == -1){
-		log_error("cant send message to socket %d: %s", to, strerror(errno));
-		free_str(&smsg);
+int send_ipc_message(int to, ipc_type type, str msg){
+	if(send(to, &type, sizeof(uint8_t), 0) -1){
+		log_error("Can't send message type to socket %d: %s", to, strerror(errno));
 		return 1;
 	}
-	free_str(&smsg);
-	char buf[2];
-	if(recv(to, buf, 2, 0) == -1){
-		log_error("receiving OK from listener");
+	if(send(to, &msg.len, sizeof(msg.len), 0) == -1){
+		log_error("Can't send message length to socket %d: %s", to, strerror(errno));
 		return 1;
 	}
-	if(strncmp(buf, "OK", 2) != 0){
-		log_error("received '%s' from listener instead of 'OK'", buf);
+	if(send(to, msg.ptr, msg.len, 0) == -1){
+		log_error("Can't send message to socket %d: %s", to, strerror(errno));
+		return 1;
+	}
+	char ack[3];
+	if(recv(to, ack, 3, 0) == -1){
+		log_error("Receiving ACK from listener");
+		return 1;
+	}
+	if(strncmp(ack, "ACK", 2) != 0){
+		log_error("Received '%.3s' from listener instead of 'ACK'", ack);
 		return 1;
 	}
 	return 0;
 }
 
-static inline ipc_message str_to_ipc_message(str smsg){
-	struct ipc_message msg;
-	u32 l;
-	memcpy(&l, smsg.ptr, sizeof(l));
-	smsg.ptr += sizeof(l);
-	msg.key = dnstr(l);
-	msg.key.len = l;
-	memcpy(msg.key.ptr, smsg.ptr, l);
-	smsg.ptr += l;
-	memcpy(&l, smsg.ptr, sizeof(l));
-	smsg.ptr += sizeof(l);
-	msg.val = dnstr(l);
-	msg.val.len = l;
-	memcpy(msg.val.ptr, smsg.ptr, l);
+ipc_msg receive_ipc_message(ipc_listener *il){
+	ipc_msg msg = {0};
+	if(recv(il->csocket, &msg.type, sizeof(uint8_t), 0) == -1){
+		log_error("Can't receive message type from socket %d: %s", il->csocket, strerror(errno));
+		goto end;
+	}
+	if(recv(il->csocket, &msg.msg.len, sizeof(msg.msg.len), 0) == -1){
+		log_error("Can't receive message length from socket %d: %s", il->csocket, strerror(errno));
+		goto end;
+	}
+	msg.msg.cap = msg.msg.len;
+	msg.msg.ptr = calloc(msg.msg.len, sizeof(char));
+	if(recv(il->csocket, msg.msg.ptr, msg.msg.len, 0) == -1){
+		log_error("Can't receive message from socket %d: %s", il->csocket, strerror(errno));
+		free_ipc_message(&msg);
+		goto end;
+	}
+end:
+	if(send(il->csocket, "ACK", slen("ACK"), 0) == -1){
+		log_error("Sending 'ACK' to sender");
+	}
 	return msg;
 }
 
-ipc_message receive_ipc_message(ipc_listener *il){
-	str smsg = dnstr(MAX_IPC_MSG_LEN); // we are gonna have to poll btw
-	ipc_message msg = {0};
-	smsg.len = recv(il->csocket, smsg.ptr, smsg.cap, 0);
-	if(smsg.len == -1){
-		log_error("cant receive message from socket %d: %s", il->csocket, strerror(errno));
-	}else{
-		msg = str_to_ipc_message(smsg);
-	}
-	if(send(il->csocket, "OK", slen("OK"), 0) == -1){
-		log_error("sending 'OK' to sender");
-	}
-	return msg;
+void free_ipc_message(ipc_msg *msg){
+	msg->type = NONE;
+	free_str(&msg->msg);
 }
 

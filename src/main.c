@@ -97,7 +97,8 @@ int main(int argc, char *argv[]){
 #ifdef SHOW_IP
 	system("curl -s http://ipinfo.io/ip && echo");
 #endif
-	
+
+
 /*
 	sqlite3 *db = setupDatabase("src/db/db.db");
 	if(db == NULL){
@@ -115,7 +116,7 @@ int main(int argc, char *argv[]){
 	}
 */
 
-
+	// TODO: lookup shutdown() for sockets
 	printf("press h for help\n");
 	bool end = false;
 	while(!end){
@@ -131,11 +132,13 @@ int main(int argc, char *argv[]){
 				}
 				struct worker w = { .pid = nw, .wsocket = accept(sender->ssocket, NULL, NULL) };
 				list_push(workers, w);
-				ipc_message msg = { .key = sstr("socket"), .val = utostr(server->ssocket, 10) };
-				send_ipc_message(w.wsocket, msg);
-				free_ipc_message(msg);
-				msg = (ipc_message){ .key = sstr("rewrites"), .val = sstr("urirewrites") };
-				send_ipc_message(w.wsocket, msg);
+				log_debug("erm");
+				log_debug("1st send returned %d",
+					send_ipc_message(w.wsocket, SOCKET, utostr(server->ssocket, 10))
+				);
+				log_debug("2nd send returned %d",
+					send_ipc_message(w.wsocket, REWRITES, sstr("urirewrites"))
+				);
 				break;
 			case 's': case 'S':
 				kill(0, SIGUSR1);
