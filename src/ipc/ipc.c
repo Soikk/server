@@ -91,7 +91,7 @@ int send_ipc_message(int to, ipc_type type, str msg){
 		log_error("Receiving ACK from listener");
 		return 1;
 	}
-	if(strncmp(ack, "ACK", 2) != 0){
+	if(strncmp(ack, "ACK", 3) != 0){
 		log_error("Received '%.3s' from listener instead of 'ACK'", ack);
 		return 1;
 	}

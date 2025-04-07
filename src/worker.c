@@ -14,6 +14,7 @@ str certfile;
 str keyfile;
 
 
+// make int for errors?
 void handle_message(ipc_msg im){
 	switch(im.type){
 		case NONE: break;
@@ -35,10 +36,10 @@ void handle_message(ipc_msg im){
 			keyfile = dup_str(im.msg);
 			break;
 		case RESTART:
-			char *args[] = {"./worker.exe", listener.saddr.ptr, NULL};
+			char *args[] = {"./worker.exe", listener->saddr.ptr, NULL};
 			execv("./worker.exe", args);
 			log_error("Cannot restart worker: %s", strerror(errno));
-			return 1;
+			return;
 			break;
 		case RELOAD:
 			// re-reads config
