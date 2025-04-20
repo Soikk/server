@@ -262,7 +262,7 @@ static inline int worker_read(http_worker *hw, str *buf){
 int receive_request(http_worker *hw, str *request){
 	// for some reason SSL_has_pending can return 0 but we can still read data
 	struct pollfd pfd[1] = { {.fd = hw->csocket, .events = POLLIN } };
-	while((hw->secure && SSL_has_pending(hw->ssl)) || poll(pfd, 1, 0)){
+	while((hw->secure && SSL_has_pending(hw->ssl)) || poll(pfd, 1, 100)){
 		int new = worker_read(hw, request);
 		if(new < 0 || (hw->secure && new == 0)){
 			int error = new;
