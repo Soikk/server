@@ -132,16 +132,26 @@ int main(int argc, char *argv[]){
 				}
 				struct worker w = { .pid = nw, .wsocket = accept(sender->ssocket, NULL, NULL) };
 				list_push(workers, w);
-				log_debug("erm");
-				log_debug("1st send returned %d",
-					send_ipc_message(w.wsocket, SOCKET, utostr(server->ssocket, 10))
-				);
-				log_debug("2nd send returned %d",
-					send_ipc_message(w.wsocket, REWRITES, sstr("urirewrites"))
-				);
+				send_ipc_message(w.wsocket, CERT, sstr("ssl/cert.pem"));
+				send_ipc_message(w.wsocket, KEY, sstr("ssl/key.pem"));
+				send_ipc_message(w.wsocket, SOCKET, utostr(server->ssocket, 10));
+				send_ipc_message(w.wsocket, REWRITES, sstr("urirewrites"));
+				//send_ipc_message(w.wsocket, HTTPS, sstr(""));
 				break;
-			case 's': case 'S':
-				kill(0, SIGUSR1);
+			case 's':
+				for(int i = 0; i < list_size(workers); i++){
+					send_ipc_message(workers[i].wsocket, HTTPS, sstr(""));
+				}
+				break;
+			case 'S':
+				for(int i = 0; i < list_size(workers); i++){
+					send_ipc_message(workers[i].wsocket, HTTP, sstr(""));
+				}
+				break;
+			case 'R':
+				for(int i = 0; i < list_size(workers); i++){
+					send_ipc_message(workers[i].wsocket, RESTART, sstr(""));
+				}
 				break;
 			case 'l': case 'L':
 				printf("|-%3d workers working for us rn-|\n", list_size(workers));

@@ -1,4 +1,4 @@
-CC = cyg
+CC = gcc
 CFLAGS = -O0 -Wall -ggdb3
 LDFLAGS = -lssl -lcrypto
 

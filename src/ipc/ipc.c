@@ -78,6 +78,7 @@ int send_ipc_message(int to, ipc_type type, str msg){
 		log_error("Can't send message type to socket %d: %s", to, strerror(errno));
 		return 1;
 	}
+	msg.len++;
 	if(send(to, &msg.len, sizeof(msg.len), 0) == -1){
 		log_error("Can't send message length to socket %d: %s", to, strerror(errno));
 		return 1;
@@ -86,6 +87,7 @@ int send_ipc_message(int to, ipc_type type, str msg){
 		log_error("Can't send message to socket %d: %s", to, strerror(errno));
 		return 1;
 	}
+	send(to, 0, 1, 0);
 	char ack[3];
 	if(recv(to, ack, 3, 0) == -1){
 		log_error("Receiving ACK from listener");

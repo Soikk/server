@@ -181,10 +181,10 @@ int setup_https(http_worker *hw, str certfile, str keyfile){
 		return 1;
 	}
 	//SSL_CTX_set_verify(hw->ssl_ctx, SSL_VERIFY_PEER, NULL);
-	if(SSL_CTX_load_verify_locations(hw->ssl_ctx, "ssl/mkarchive.net/ca_bundle.crt", NULL) <= 0){
+	/*if(SSL_CTX_load_verify_locations(hw->ssl_ctx, "ssl/mkarchive.net/ca_bundle.crt", NULL) <= 0){
 		log_error("Verifying certificate locations");
 		return 1;
-	}
+	}*/
 	if(SSL_CTX_use_certificate_file(hw->ssl_ctx, certfile.ptr, SSL_FILETYPE_PEM) <= 0){
 		log_error("Using certificate file");
 		return 1;
@@ -199,6 +199,7 @@ int setup_https(http_worker *hw, str certfile, str keyfile){
 		return 1;
 	}
 	SSL_set_accept_state(hw->ssl);
+	hw->secure = 1;
 
 	return 0;
 }
@@ -216,6 +217,7 @@ void reset_https(http_worker *hw){
 
 void terminate_https(http_worker *hw){
 	if(hw != NULL){
+		hw->secure = 0;
 		if(hw->ssl != NULL){
 			SSL_free(hw->ssl);
 			hw->ssl = NULL;
