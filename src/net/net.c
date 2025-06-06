@@ -232,7 +232,7 @@ void terminate_https(http_worker *hw){
 int accept_connection(http_worker *hw, char ip[INET_ADDRSTRLEN]){
 	struct sockaddr_storage caddr;
 	int casize = sizeof(caddr);
-	log_info("waiting...");
+	log_info("Waiting...");
 	if((hw->csocket = accept(hw->ssocket, (struct sockaddr *)&caddr, (socklen_t*)&casize)) == -1){
 		log_error("accept_socket() -> accept(): %s", strerror(errno));
 		return -1;
@@ -260,7 +260,7 @@ static inline int worker_read(http_worker *hw, str *buf){
 }
 
 int receive_request(http_worker *hw, str *request){
-	// for some reason SSL_has_pending can return 0 but we can still read data
+	// SSL_has_pending can return 0 if you havent read any bytes yet (https://stackoverflow.com/questions/6616976/why-does-this-ssl-pending-call-always-return-zero)
 	struct pollfd pfd[1] = { {.fd = hw->csocket, .events = POLLIN } };
 	while((hw->secure && SSL_has_pending(hw->ssl)) || poll(pfd, 1, 100)){
 		int new = worker_read(hw, request);

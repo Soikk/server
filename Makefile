@@ -12,7 +12,7 @@ else
 	RUNCMD = ./server.exe
 endif
 
-OBJS = $(addprefix $(OBJDIR)/, bit.o str.o log.o list.o crc64.o dir.o net.o ipc.o)
+OBJS = $(addprefix $(OBJDIR)/, bit.o str.o log.o list.o crc64.o dir.o net.o ipc.o config.o)
 
 INCL = -I$(LIBDIR) -I$(SRCDIR)
 
