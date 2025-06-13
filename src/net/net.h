@@ -17,7 +17,7 @@
 #include <time.h>
 #include "str/str.h"
 #include "list/list.h"
-#include "dir/dir.h"
+#include "files/files.h"
 #include "log/log.h"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -115,7 +115,7 @@ int accept_connection(http_worker *hw, char ip[INET_ADDRSTRLEN]);
 
 int receive_request(http_worker *hw, str *request);
 
-struct file generate_resource(struct uri resource, str url);
+str generate_resource(struct uri resource, str url);
 
 char *handlePOST(char *request);
 

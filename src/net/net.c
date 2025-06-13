@@ -282,8 +282,8 @@ int receive_request(http_worker *hw, str *request){
 	return 0;
 }
 
-struct file generate_resource(struct uri resource, str url){
-	struct file file = {0};
+str generate_resource(struct uri resource, str url){
+	str file = {0};
 	/*
 		generate if all of these are true
 		1) no file specified (aka we need index.html)
@@ -309,7 +309,7 @@ struct file generate_resource(struct uri resource, str url){
 		free_str(&command);
 	}
 	free_str(&phpfile);
-	file.name = dup_str(resource.path);
+	file = dup_str(resource.path);
 /*
 	if(uri.query.len > 0){
 		if(access(uri.path.ptr, F_OK) != 0){
@@ -598,7 +598,7 @@ void send_file(http_worker *hw, str filename){
 	log_info("sending '%.*s'", filename.len, filename.ptr);
 
 	enum mime_type type = TXT;
-	str fmt = get_file_format(filename);
+	str fmt = dstr(get_extension(filename.ptr));
 	for(int i = 0; i < sizeof(mime_types)/sizeof(mime_types[0]); i++){
 		if(strncmp(fmt.ptr, mime_types[i].fmt.ptr, fmt.len) == 0){
 			type = i;
@@ -641,8 +641,7 @@ void send_file(http_worker *hw, str filename){
 		// 	sendfile(socket, fd, NULL, fsize);
 
 		// we're ignoring MAX_BODY_SIZE
-		str fuckcygwinineedsendfile;
-		fd_to_str(&fuckcygwinineedsendfile, fd, fsize);
+		str fuckcygwinineedsendfile = fd_to_nstr(fd, fsize);
 		sent = worker_write(hw, fuckcygwinineedsendfile);
 		free_str(&fuckcygwinineedsendfile);
 
