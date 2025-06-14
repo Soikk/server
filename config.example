@@ -1,0 +1,65 @@
+# lines that start with # are skipped
+name		website.com	# name of the server. the # isnt really needed here as the config reader skips to the next line once it reads the needed value
+port		443		# port the server will be running on
+backlog		15		# backlog for the socket
+logs {
+	# adds logging (for all processes) to specified files, and can turn logging to stderr off (0) or on (not 0)
+	# log level	log file	read mode
+	# only w or a permitted as read more (same read modes as fopen)
+	# INFO	loginfo.txt	w
+	ERROR	stderr	0
+	ERROR	stderr	1
+	# ERROR	stderr	144
+}
+
+# config specific to the worker
+worker {
+	root	/home/user/server/	# where the server will look for files, basically files prefix
+	bundle	/ca/bundle/location	# location of ca bundle
+	cert	/certificate/location	# location of certificate
+	key	/key/location		#location of private key
+	http	# turns https off
+	https	# turns https on
+	ipv4	# ipv4 enabled
+	ipv6	# ipv6 enabled
+	types	mime.types	# file from where to read types
+	types {
+		# reading types from config directly
+		# description	extension
+		type/ext	ext
+	}
+
+	# HTTP method rules
+	# not implemented yet
+	# GET {
+	# 	# request	document to server	code to server
+	# 	/		homepage.html	200
+	# 	/help		help.html	200
+	# 	/*		404.html	 404
+	# }
+
+	# same but for different method
+	# POST {
+	# 	# etc
+	# }
+
+	# custom methods
+	# * {
+	# 	/*	/	501
+	# }
+
+	# HTTP response codes
+	# codes {
+	# 	# code	code text
+	# 	200	"OK"
+	# 	404	"Not Found"
+	# 	418	"I'm a teapot"
+	# 	501	"Not implemented"
+	# 	# custom codes
+	# 	711	"Double gulp cup"
+	# }
+
+	# same but can also be gotten from file
+	# codes	codes.txt
+}
+
