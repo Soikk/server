@@ -12,47 +12,6 @@ str response_headers[] = {
 	sstr("Transfer-Encoding"),
 };
 
-struct {
-	str fmt;
-	str type;
-} mime_types[] = {
-	{.fmt = sstr("avif"), .type = sstr("image/avif")},
-	{.fmt = sstr("bmp"), .type = sstr("image/bmp")},
-	{.fmt = sstr("css"), .type = sstr("text/css")},
-	{.fmt = sstr("csv"), .type = sstr("text/csv")},
-	{.fmt = sstr("eot"), .type = sstr("application/vnd.ms-fontobject")},
-	{.fmt = sstr("gz"), .type = sstr("application/gzip")},
-	{.fmt = sstr("gif"), .type = sstr("image/gif")},
-	{.fmt = sstr("html"), .type = sstr("text/html")},
-	{.fmt = sstr("ico"), .type = sstr("image/vnd.microsoft.icon")},
-	{.fmt = sstr("jpg"), .type = sstr("image/jpeg")},
-	{.fmt = sstr("jpeg"), .type = sstr("image/jpeg")},
-	{.fmt = sstr("js"), .type = sstr("text/javascript")},
-	{.fmt = sstr("json"), .type = sstr("application/json")},
-	{.fmt = sstr("midi"), .type = sstr("audio/midi")},
-	{.fmt = sstr("mp3"), .type = sstr("audio/mpeg")},
-	{.fmt = sstr("mp4"), .type = sstr("video/mp4")},
-	{.fmt = sstr("mpeg"), .type = sstr("video/mpeg")},
-	{.fmt = sstr("png"), .type = sstr("image/png")},
-	{.fmt = sstr("pdf"), .type = sstr("application/pdf")},
-	{.fmt = sstr("php"), .type = sstr("application/x-httpd-php")},
-	{.fmt = sstr("rar"), .type = sstr("application/vnd.rar")},
-	{.fmt = sstr("svg"), .type = sstr("image/svg+xml")},
-	{.fmt = sstr("tiff"), .type = sstr("image/tiff")},
-	{.fmt = sstr("ts"), .type = sstr("video/mp2t")},
-	{.fmt = sstr("ttf"), .type = sstr("font/ttf")},
-	{.fmt = sstr("txt"), .type = sstr("text/plain")},
-	{.fmt = sstr("wav"), .type = sstr("audio/wav")},
-	{.fmt = sstr("weba"), .type = sstr("audio/webm")},
-	{.fmt = sstr("webm"), .type = sstr("video/webm")},
-	{.fmt = sstr("webp"), .type = sstr("image/webp")},
-	{.fmt = sstr("woff"), .type = sstr("font/woff")},
-	{.fmt = sstr("woff2"), .type = sstr("font/woff2")},
-	{.fmt = sstr("xml"), .type = sstr("application/xml")},
-	{.fmt = sstr("zip"), .type = sstr("application/zip")},
-	{.fmt = sstr("7z"), .type = sstr("application/x-7z-compressed")},
-};
-
 LIST(struct uri_mod) uri_rewrites = NULL;
 
 static int pleasesslgivemetheerror(int ssl_get_error){
@@ -597,20 +556,14 @@ void send_file(http_worker *hw, str filename){
 	}
 	log_info("sending '%.*s'", filename.len, filename.ptr);
 
-	enum mime_type type = TXT;
-	str fmt = dstr(get_extension(filename.ptr));
-	for(int i = 0; i < sizeof(mime_types)/sizeof(mime_types[0]); i++){
-		if(strncmp(fmt.ptr, mime_types[i].fmt.ptr, fmt.len) == 0){
-			type = i;
-			break;
-		}
-	}
-	free_str(&fmt);
+	str ext = dsstr(get_extension(filename.ptr));
+	str type = get_mime_type(ext);
+	if(type.len == 0) type = sstr("text/plain");
 
 	struct http_message hm = {
 		.resp_ver = sstr("HTTP/1.1"), .status = sstr("200"), .reason = sstr("OK"),
 		.hlen = 2, .headers = {
-			{ .name = response_headers[CONTENT_TYPE], .value = mime_types[type].type },
+			{ .name = response_headers[CONTENT_TYPE], .value = type },
 			{ .name = response_headers[CONTENT_LENGTH], .value = utostr(fsize, 10) }
 		},
 		.body = {0},

@@ -19,6 +19,7 @@
 #include "list/list.h"
 #include "files/files.h"
 #include "log/log.h"
+#include "mime/mime.h"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <poll.h>
@@ -32,16 +33,6 @@ typedef enum http_method {
 	GET, HEAD, OPTIONS, TRACE,
 	DELETE, PUT, POST, PATCH
 } http_method;
-
-
-
-enum mime_type {
-	AVIF, BMP, CSS, CSV, GZ, GIF, HTML,
-	ICO, JPG, JPEG, JS, JSON, MIDI, MP3,
-	MP4, MPEG, PNG, PDF, PHP, RAR, TIFF, TS,
-	TXT, WAV, WEBA, WEBM, WEBP, XML, ZIP,
-	_7Z,
-};
 
 
 struct uri {
