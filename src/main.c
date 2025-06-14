@@ -7,11 +7,13 @@
 #include "net/net.h"
 #include "log/log.h"
 #include "ipc/ipc.h"
+#include "config/config.h"
 
 #define BACKLOG 15
 
-str ipcaddr = sstr(".ipcserver");
-str port;
+config_m config;
+str server_dir;
+str ipc_addr;
 http_server *server;
 ipc_sender *sender;
 struct worker {
@@ -27,41 +29,57 @@ void worker_undertaker(int sig, siginfo_t *info, void *ucontext){
 	}
 }
 
-int init(char *argv[]){
-	port = snstr(argv[1], len(argv[1])); // error check
-	if(port.len <= 0 || port.len > 5){
-		log_error("wrong server port: '%.*s'", port.len, port.ptr);
-		return 1;
+int init(char *configfile){
+	config = master_config(configfile);
+	server_dir = dup_strs(sstr("/var/run/"), config.name, sstr("/"));
+	if(!dir_exists(server_dir.ptr)){
+		if(mkdir(server_dir.ptr, 0770) != 0){
+			log_error("Error creating server directory in '%.*s': %s", server_dir.len, server_dir.ptr, strerror(errno));
+			return 1;
+		}
+	}
+	ipc_addr = dup_strs(server_dir, sstr("ipcserver"));
+	if(path_exists(ipc_addr.ptr)){
+		if(remove(ipc_addr.ptr) != 0){
+			log_error("Error removing existing IPC socket '%.*s': %s", ipc_addr.len, ipc_addr.ptr, strerror(errno));
+			return 1;
+		}
 	}
 	// decouple so the whole net.c doesnt get linked?
+	str port = utostr(config.port, 10);
 	server = setup_http_server(port, BACKLOG);
+	free_str(&port);
 	if(server == NULL){
-		log_error("Setting up socket server");
+		log_error("Error setting up socket server");
 		return 1;
 	}
 	// configurable name?
-	sender = setup_ipc_sender(ipcaddr, BACKLOG);
+	sender = setup_ipc_sender(ipc_addr, BACKLOG);
 	if(sender == NULL){
-		log_error("setting up ipc sender");
+		log_error("Error setting up ipc sender");
 		return 1;
 	}
 	init_list(workers);
 	struct sigaction chld = { .sa_sigaction = worker_undertaker, .sa_flags = SA_SIGINFO };
 	if(sigaction(SIGCHLD, &chld, NULL) == -1){
-		log_error("init: SIGCHLD: %s", strerror(errno));
+		log_error("Error setting up SIGCHLD signal handler: %s", strerror(errno));
 		return 1;
 	}
 	return 0;
 }
 
 void deinit(void){
+	free_master_config(&config);
+	// clean up server dir
+	free_str(&server_dir);
+	free_str(&ipc_addr);
 	destroy_http_server(&server);
 	destroy_ipc_sender(&sender);
 	list_free(workers);
 }
 
 void print_usage(void){
-	printf("server [port]\n");
+	printf("server [config]\n");
 }
 
 void show_commands(void){
@@ -77,7 +95,6 @@ void show_commands(void){
 	);
 }
 
-#include "crc64/crc64.h"
 
 int main(int argc, char *argv[]){
 
@@ -88,10 +105,11 @@ int main(int argc, char *argv[]){
 
 	int return_value = 0;
 
-	if(init(argv) != 0){
+	if(init(argv[1]) != 0){
 		return_value = 1;
 		goto DEINIT;
 	}
+	print_master_config(config);
 	log_info("Config done");
 
 #ifdef SHOW_IP
@@ -125,7 +143,7 @@ int main(int argc, char *argv[]){
 			case 'f': case 'F':
 				pid_t nw = fork();
 				if(nw == 0){
-					char *args[] = {"./worker.exe", ipcaddr.ptr, NULL};
+					char *args[] = {"./worker.exe", ipc_addr.ptr, NULL};
 					execv("./worker.exe", args);
 					log_error("Cannot exec worker: %s", strerror(errno));
 					return 1;
