@@ -25,8 +25,9 @@ typedef struct ipc_listener {
 
 typedef enum ipc_type {
 	NONE,
-	SOCKET, REWRITES, // do away with these?
-	CERT, KEY,
+	SOCKET,
+	REWRITES, // do away with this?
+	BUNDLE, CERT, KEY,
 	RESTART,
 	RELOAD,
 	HTTP,
