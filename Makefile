@@ -36,5 +36,5 @@ clean:
 	rm -f worker.exe server.exe $(OBJDIR)/*.o
 
 memcheck:
-	sudo valgrind --show-leak-kinds=all --leak-check=full --track-origins=yes --trace-children=yes -s $(RUNCMD) 443
+	sudo valgrind --show-leak-kinds=all --leak-check=full --track-origins=yes --trace-children=yes -s $(RUNCMD) config
 	
