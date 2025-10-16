@@ -4,12 +4,23 @@
 #include "str/str.h"
 #include "ipc/ipc.h"
 #include "net/net.h"
+#include "config/config.h"
 
 
+config_w config;
+struct {
+	str path;
+	str ipc_addr;
+	str self;
+} dir;
 ipc_listener *listener;
 http_worker *worker;
+
+// remove these or something
 int secure;
 str rewritesfile;
+str rootdir;
+str bundlefile;
 str certfile;
 str keyfile;
 struct pollfd fds[2] = {0};
@@ -43,13 +54,19 @@ void handle_message(ipc_msg im){
 			munmap(rewritesfile.ptr, fsize);
 			close(fd);
 			break;
-		case CERT:
-			// look into reinitializing the worker when receiving this
+		//case ROOT:
+		//	free_str(&rootdir);
+		//	rootdir = dup_str(im.msg);
+		//	break;
+		case BUNDLE:	// look into reinitializing the worker when receiving this
+			free_str(&bundlefile);
+			bundlefile = dup_str(im.msg);
+			break;
+		case CERT:	// look into reinitializing the worker when receiving this
 			free_str(&certfile);
 			certfile = dup_str(im.msg);
 			break;
-		case KEY:
-			// look into reinitializing the worker when receiving this
+		case KEY:	// look into reinitializing the worker when receiving this
 			free_str(&keyfile);
 			keyfile = dup_str(im.msg);
 			break;
@@ -61,6 +78,7 @@ void handle_message(ipc_msg im){
 			break;
 		case RELOAD:
 			// re-reads config
+			// re-requests entire config;
 			break;
 		case HTTP:
 			log_info("received http signal");
@@ -85,10 +103,56 @@ void handle_message(ipc_msg im){
 	}
 }
 
+// possibly change name
+
+int create_server_dir(str name){
+	dir.path = dup_strs(sstr("/var/run/"), name, sstr("/"));
+	dir.ipc_addr = dup_strs(dir.path, sstr("ipcserver"));
+	str pid = utostr(getpid(), 10);
+	dir.self = dup_strs(dir.path, sstr("workers/"), pid);
+	printf("WE'RE GONNA CREATE THE FILE %s\n", dir.self.ptr);
+	free_str(&pid);
+	if(file_exists(dir.self.ptr)){
+		log_error("Error creating PID record for self in '%.*s': it already exists", dir.self.len, dir.self.ptr);
+		return 1;
+	}
+	if(creat(dir.self.ptr, 0777) == -1){
+		log_error("Error creating PID record for self in '%.*s': %s", dir.self.len, dir.self.ptr, strerror(errno));
+		return 1;
+	}
+	return 0;
+}
+
+int init(char *configfile){
+	config = worker_config(configfile);
+	if(create_server_dir(config.name) != 0){
+		return 1;
+	}
+	return 0;
+}
+
+// possibly change name
+void remove_server_dir(void){
+	if(remove(dir.self.ptr) != 0){
+		log_error("Error removing PID record for self in '%.*s': %s", dir.self.len, dir.self.ptr, strerror(errno));
+	}
+	printf("%s IS NO MORE!", dir.self.ptr);
+	free_str(&dir.self);
+	free_str(&dir.ipc_addr);
+	free_str(&dir.path);
+}
+
+void deinit(void){
+	free_worker_config(&config);
+	remove_server_dir();
+}
+
 
 int main(int argc, char **argv){
 
 	int return_value = 0;
+
+	init("config");
 
 	listener = setup_ipc_listener((str){.cap = 0, .len = len(argv[1]), .ptr = argv[1]});
 	if(listener == NULL){
@@ -98,7 +162,7 @@ int main(int argc, char **argv){
 	}
 	log_info("init'd");
 
-	bool end = false;
+	//bool end = false;
 	log_debug("erm");
 	str request = {.cap = 8192, .len = 0, .ptr = alloca(8192)};
 
@@ -109,13 +173,14 @@ int main(int argc, char **argv){
 		if(r > 0){
 			log_info("[%d] %d\t-\t%d", fds[1].fd, fds[1].events & POLLIN, fds[1].revents & POLLIN);
 		}
-		if(fds[0].revents & POLLIN){
+		if(fds[0].revents & POLLHUP){
+			log_info("RECEIVED POLLHUP!!!!!!");
+			// end? or something idk
+		}else if(fds[0].revents & POLLIN){
 			ipc_msg msg = receive_ipc_message(listener);
 			handle_message(msg);
 			free_ipc_message(&msg);
 			continue;
-		}else if(fds[0].revents & POLLHUP){
-			// end? or something idk
 		}else if(fds[1].revents & POLLIN){
 			log_info("ermmm");
 			char cip[INET_ADDRSTRLEN] = {0};
@@ -150,10 +215,10 @@ int main(int argc, char **argv){
 
 			switch(method){
 				case GET:
-					struct file resource = generate_resource(suri, hm.uri);
-					send_file(worker, resource.name);
+					str resource = generate_resource(suri, hm.uri);
+					send_file(worker, resource);
 					//if(resource.temp == true) remove(resource.name.ptr);
-					free_str(&resource.name);
+					free_str(&resource);
 					break;
 				case POST:
 					//handlePOST(request);
@@ -185,6 +250,7 @@ int main(int argc, char **argv){
 	}
 
 DEINIT:
+	deinit();
 	log_info("dieing :(");
 	destroy_ipc_listener(&listener);
 	destroy_http_worker(&worker);

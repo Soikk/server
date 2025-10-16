@@ -12,8 +12,11 @@
 #define BACKLOG 15
 
 config_m config;
-str server_dir;
-str ipc_addr;
+struct {
+	str path;
+	str ipc_addr;
+	str workers;
+} dir;
 http_server *server;
 ipc_sender *sender;
 struct worker {
@@ -29,21 +32,39 @@ void worker_undertaker(int sig, siginfo_t *info, void *ucontext){
 	}
 }
 
-int init(char *configfile){
-	config = master_config(configfile);
-	server_dir = dup_strs(sstr("/var/run/"), config.name, sstr("/"));
-	if(!dir_exists(server_dir.ptr)){
-		if(mkdir(server_dir.ptr, 0770) != 0){
-			log_error("Error creating server directory in '%.*s': %s", server_dir.len, server_dir.ptr, strerror(errno));
+int create_server_dir(str name){
+	dir.path = dup_strs(sstr("/var/run/"), name, sstr("/"));
+	if(!dir_exists(dir.path.ptr)){
+		if(mkdir(dir.path.ptr, 0777) != 0){
+			log_error("Error creating server directory in '%.*s': %s", dir.path.len, dir.path.ptr, strerror(errno));
 			return 1;
 		}
 	}
-	ipc_addr = dup_strs(server_dir, sstr("ipcserver"));
-	if(path_exists(ipc_addr.ptr)){
-		if(remove(ipc_addr.ptr) != 0){
-			log_error("Error removing existing IPC socket '%.*s': %s", ipc_addr.len, ipc_addr.ptr, strerror(errno));
+	dir.ipc_addr = dup_strs(dir.path, sstr("ipcserver"));
+	if(path_exists(dir.ipc_addr.ptr)){
+		if(remove(dir.ipc_addr.ptr) != 0){
+			log_error("Error removing existing IPC socket '%.*s': %s", dir.ipc_addr.len, dir.ipc_addr.ptr, strerror(errno));
 			return 1;
 		}
+	}
+	dir.workers = dup_strs(dir.path, sstr("workers/"));
+	if(!dir_exists(dir.workers.ptr)){
+		if(mkdir(dir.workers.ptr, 0777) != 0){
+			log_error("Error creating workers directory in '%.*s': %s", dir.workers.len, dir.workers.ptr, strerror(errno));
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int init(char *configfile){
+	config = master_config(configfile);
+	if(config.name.len == 0){
+		log_error("Error: no name for server provided in config");
+		return 1;
+	}
+	if(create_server_dir(config.name) != 0){
+		return 1;
 	}
 	// decouple so the whole net.c doesnt get linked?
 	str port = utostr(config.port, 10);
@@ -54,7 +75,7 @@ int init(char *configfile){
 		return 1;
 	}
 	// configurable name?
-	sender = setup_ipc_sender(ipc_addr, BACKLOG);
+	sender = setup_ipc_sender(dir.ipc_addr, BACKLOG);
 	if(sender == NULL){
 		log_error("Error setting up ipc sender");
 		return 1;
@@ -68,11 +89,25 @@ int init(char *configfile){
 	return 0;
 }
 
+void remove_server_dir(void){
+	// remove workers entries first
+	if(remove(dir.workers.ptr) != 0){
+		log_error("Error removing workers directory in '%.*s': %s", dir.workers.len, dir.workers.ptr, strerror(errno));
+	}
+	free_str(&dir.workers);
+	if(remove(dir.ipc_addr.ptr) != 0){
+		log_error("Error removing IPC socket '%.*s': %s", dir.ipc_addr.len, dir.ipc_addr.ptr, strerror(errno));
+	}
+	free_str(&dir.ipc_addr);
+	if(remove(dir.path.ptr) != 0){
+		log_error("Error removing server directory in '%.*s': %s", dir.path.len, dir.path.ptr, strerror(errno));
+	}
+	free_str(&dir.path);
+}
+
 void deinit(void){
 	free_master_config(&config);
-	// clean up server dir
-	free_str(&server_dir);
-	free_str(&ipc_addr);
+	remove_server_dir();
 	destroy_http_server(&server);
 	destroy_ipc_sender(&sender);
 	list_free(workers);
@@ -143,7 +178,7 @@ int main(int argc, char *argv[]){
 			case 'f': case 'F':
 				pid_t nw = fork();
 				if(nw == 0){
-					char *args[] = {"./worker.exe", ipc_addr.ptr, NULL};
+					char *args[] = {"./worker.exe", dir.ipc_addr.ptr, NULL};
 					execv("./worker.exe", args);
 					log_error("Cannot exec worker: %s", strerror(errno));
 					return 1;
@@ -152,7 +187,9 @@ int main(int argc, char *argv[]){
 				list_push(workers, w);
 				send_ipc_message(w.wsocket, CERT, sstr("ssl/cert.pem"));
 				send_ipc_message(w.wsocket, KEY, sstr("ssl/key.pem"));
-				send_ipc_message(w.wsocket, SOCKET, utostr(server->ssocket, 10));
+				str ss = utostr(server->ssocket, 10);
+				send_ipc_message(w.wsocket, SOCKET, ss);
+				free_str(&ss);
 				send_ipc_message(w.wsocket, REWRITES, sstr("urirewrites"));
 				//send_ipc_message(w.wsocket, HTTPS, sstr(""));
 				break;
@@ -190,7 +227,8 @@ int main(int argc, char *argv[]){
 				break;
 			case 'q': case 'Q':
 				while(list_size(workers) > 0){
-					kill(workers[0].pid, SIGKILL); // redo this PLEASE
+					shutdown(workers[0].wsocket, SHUT_RDWR);
+					//kill(workers[0].pid, SIGQUIT); // redo this PLEASE
 					waitpid(workers[0].pid, NULL, 0);
 				}
 				while(wait(NULL) > 0);
@@ -210,6 +248,7 @@ int main(int argc, char *argv[]){
 
 DEINIT:
 	deinit();
+	log_info("Finished cleaning up");
 
 	return return_value;
 }
