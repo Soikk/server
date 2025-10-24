@@ -67,9 +67,7 @@ int init(char *configfile){
 		return 1;
 	}
 	// decouple so the whole net.c doesnt get linked?
-	str port = utostr(config.port, 10);
-	server = setup_http_server(port, BACKLOG);
-	free_str(&port);
+	server = setup_http_server(config.port, BACKLOG);
 	if(server == NULL){
 		log_error("Error setting up socket server");
 		return 1;

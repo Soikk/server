@@ -28,7 +28,7 @@ static void read_logs(str logs){
 			continue;
 		}
 		if(log_get_files(level) >= MAX_LOGFILES){
-			log_warn("Cannot add any more files to logging level %.*s", slevel.len, slevel.ptr);
+			log_warn("Cannot add any more files to logging level '%.*s'", slevel.len, slevel.ptr);
 			while(off < logs.len && !charislinebreak(logs.ptr[off])) off++;
 			continue;
 		}
@@ -58,7 +58,7 @@ static void read_logs(str logs){
 	}
 }
 
-void rotate_logs(str logs){
+static void rotate_logs(str logs){
 	for(int i = 0; i < LOG_LEVEL_COUNT; i++){
 		log_remove_fps(i);
 		log_set_stderr(i, 1);
@@ -86,7 +86,8 @@ config_m master_config(char *filename){
 		}else if(streq(key, sstr("port"))){
 			str val = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += val.len;
-			conf.port = (int)strtou(val);
+			int port = strtou(val);
+			conf.port = port > 65535 || port < 1 ? dsstr("65535") : val;
 		}else if(streq(key, sstr("backlog"))){
 			str val = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += val.len;
@@ -200,7 +201,7 @@ config_w worker_config(char *filename){
 
 void free_master_config(config_m *conf){
 	conf->name = (str){0};
-	conf->port = 0;
+	conf->port = (str){0};
 	conf->backlog = 0;
 	unmap_file(&conf->file);
 }
@@ -226,11 +227,11 @@ void print_master_config(config_m conf){
 	printf(
 		"MASTER CONFIGURATION:\n"
 		"\t- name:    %.*s\n"
-		"\t- port:    %d\n"
+		"\t- port:    %.*s\n"
 		"\t- backlog: %d\n"
 		"\t- logs:   {\n",
 		conf.name.len, conf.name.ptr,
-		conf.port,
+		conf.port.len, conf.port.ptr,
 		conf.backlog
 	);
 	for(int i = 0; i < LOG_LEVEL_COUNT; i++){

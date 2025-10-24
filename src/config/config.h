@@ -11,7 +11,7 @@
 typedef struct config_m {
 	str file;
 	str name;
-	int port;
+	str port;
 	int backlog;
 } config_m;
 
