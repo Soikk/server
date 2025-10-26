@@ -9,7 +9,7 @@
 #include "ipc/ipc.h"
 #include "config/config.h"
 
-#define BACKLOG 15
+#define IPC_BACKLOG 15
 
 config_m config;
 struct {
@@ -63,19 +63,21 @@ int init(char *configfile){
 		log_error("Error: no name for server provided in config");
 		return 1;
 	}
+	print_master_config(config);
+	log_info("Succesfully read config from '%s'", configfile);
 	if(create_server_dir(config.name) != 0){
 		return 1;
 	}
 	// decouple so the whole net.c doesnt get linked?
-	server = setup_http_server(config.port, BACKLOG);
+	server = setup_http_server(config.port, config.backlog);
 	if(server == NULL){
 		log_error("Error setting up socket server");
 		return 1;
 	}
 	// configurable name?
-	sender = setup_ipc_sender(dir.ipc_addr, BACKLOG);
+	sender = setup_ipc_sender(dir.ipc_addr, IPC_BACKLOG);
 	if(sender == NULL){
-		log_error("Error setting up ipc sender");
+		log_error("Error setting up IPC sender");
 		return 1;
 	}
 	init_list(workers);
@@ -142,8 +144,10 @@ int main(int argc, char *argv[]){
 		return_value = 1;
 		goto DEINIT;
 	}
-	print_master_config(config);
-	log_info("Config done");
+	log_debug("test");
+	log_info("test");
+	log_warn("test");
+	log_error("test");
 
 #ifdef SHOW_IP
 	system("curl -s http://ipinfo.io/ip && echo");
@@ -232,12 +236,12 @@ int main(int argc, char *argv[]){
 				while(wait(NULL) > 0);
 				close(server->ssocket);
 				end = true;
-				log_info("%d children remaining alive (lie)\n", list_size(workers));
+				log_info("%d children remaining alive (lie)", list_size(workers));
 				break;
 			case '0': case '1': case '2': case '3': case '4':
 			case '5': case '6': case '7': case '8': case '9':
 				if(list_size(workers) > c-'0'){
-					log_info("signaling worker[%d] %d to turn off ssl\n", c-'0', workers[c-'0'].pid);
+					log_info("signaling worker[%d] %d to turn off ssl", c-'0', workers[c-'0'].pid);
 					sigqueue(workers[c-'0'].pid, SIGRTMIN, (union sigval){.sival_int = 0});
 				}
 				break;

@@ -152,7 +152,7 @@ int main(int argc, char **argv){
 
 	int return_value = 0;
 
-	init("config");
+	init("config.example");
 
 	listener = setup_ipc_listener((str){.cap = 0, .len = len(argv[1]), .ptr = argv[1]});
 	if(listener == NULL){

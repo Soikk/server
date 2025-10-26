@@ -126,6 +126,10 @@ config_m master_config(char *filename){
 config_w worker_config(char *filename){
 	config_w conf = {0};
 	conf.file = map_file(filename);
+	if(conf.file.ptr == NULL){
+		log_error("Unable to open config file '%s'", filename);
+		return conf;
+	}
 	init_nlist(conf.files);
 	int off = 0;
 	while(off < conf.file.len){
