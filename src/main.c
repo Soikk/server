@@ -59,12 +59,12 @@ int create_server_dir(str name){
 
 int init(char *configfile){
 	config = master_config(configfile);
-	if(config.name.len == 0){
-		log_error("Error: no name for server provided in config");
+	if(config.name.len == 0){ // TODO: maybe check for this someway else
+		log_error("Unable to read config from '%s'", configfile);
 		return 1;
 	}
 	print_master_config(config);
-	log_info("Succesfully read config from '%s'", configfile);
+	log_info("Succesfully read master config from '%s'", configfile);
 	if(create_server_dir(config.name) != 0){
 		return 1;
 	}

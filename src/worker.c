@@ -107,6 +107,10 @@ void handle_message(ipc_msg im){
 
 int create_server_dir(str name){
 	dir.path = dup_strs(sstr("/var/run/"), name, sstr("/"));
+	if(!dir_exists(dir.path.ptr)){
+		log_error("No server directory in '%.*s': %s", dir.path.len, dir.path.ptr);
+		return 1;
+	}
 	dir.ipc_addr = dup_strs(dir.path, sstr("ipcserver"));
 	str pid = utostr(getpid(), 10);
 	dir.self = dup_strs(dir.path, sstr("workers/"), pid);
@@ -125,6 +129,12 @@ int create_server_dir(str name){
 
 int init(char *configfile){
 	config = worker_config(configfile);
+	if(config.name.len == 0){ // TODO: maybe check for this someway else
+		log_error("Unable to read config from '%s'", configfile);
+		return 1;
+	}
+	print_worker_config(config);
+	log_info("Succesfully read worker config from '%s'", configfile);
 	if(create_server_dir(config.name) != 0){
 		return 1;
 	}
