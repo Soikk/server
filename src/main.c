@@ -14,6 +14,8 @@
 config_m config;
 struct {
 	str path;
+	str sock_path;
+	str sock_addr;
 	str ipc_addr;
 	str workers;
 } dir;
@@ -40,6 +42,24 @@ int create_server_dir(str name){
 			return 1;
 		}
 	}
+	dir.sock_path = dup_strs(dir.path, sstr("socket/"));
+	log_info("creating sock path in %.*s", dir.sock_path.len, dir.sock_path.ptr);
+	if(!dir_exists(dir.sock_path.ptr)){
+	// TODO: else? how to reattach to socket? how to leave socket reattachable?
+	// TODO: look at ptrace(2)
+		if(mkdir(dir.sock_path.ptr, 0777) != 0){
+			log_error("Error creating socket directory in '%.*s': %s", dir.sock_path.len, dir.sock_path.ptr, strerror(errno));
+			return 1;
+		}
+	}
+	str sssocket = utostr(server->ssocket, 10);
+	dir.sock_addr = dup_strs(dir.sock_path, sssocket);
+	free_str(&sssocket);
+	log_info("creating sock in %.*s", dir.sock_addr.len, dir.sock_addr.ptr);
+	if(creat(dir.sock_addr.ptr, 0777) == -1){
+		log_error("Error creating socket file for server in '%.*s': %s", dir.sock_addr.len, dir.sock_addr.ptr, strerror(errno));
+		return 1;
+	}
 	dir.ipc_addr = dup_strs(dir.path, sstr("ipcserver"));
 	if(path_exists(dir.ipc_addr.ptr)){
 		if(remove(dir.ipc_addr.ptr) != 0){
@@ -65,13 +85,13 @@ int init(char *configfile){
 	}
 	print_master_config(config);
 	log_info("Succesfully read master config from '%s'", configfile);
-	if(create_server_dir(config.name) != 0){
-		return 1;
-	}
 	// decouple so the whole net.c doesnt get linked?
 	server = setup_http_server(config.port, config.backlog);
 	if(server == NULL){
 		log_error("Error setting up socket server");
+		return 1;
+	}
+	if(create_server_dir(config.name) != 0){
 		return 1;
 	}
 	// configurable name?
@@ -90,6 +110,12 @@ int init(char *configfile){
 }
 
 void remove_server_dir(void){
+	if(remove(dir.sock_addr.ptr) != 0){
+		log_error("Error removing socket file in '%.*s': %s", dir.sock_addr.len, dir.sock_addr.ptr, strerror(errno));
+	}
+	if(remove(dir.sock_path.ptr) != 0){
+		log_error("Error removing socket path in '%.*s': %s", dir.sock_path.len, dir.sock_path.ptr, strerror(errno));
+	}
 	// remove workers entries first
 	if(remove(dir.workers.ptr) != 0){
 		log_error("Error removing workers directory in '%.*s': %s", dir.workers.len, dir.workers.ptr, strerror(errno));
