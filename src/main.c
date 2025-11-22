@@ -14,9 +14,9 @@
 config_m config;
 struct {
 	str path;
-	str sock_path;
-	str sock_addr;
+	str socket_file;
 	str ipc_addr;
+	str config_file;
 	str workers;
 } dir;
 http_server *server;
@@ -27,10 +27,69 @@ struct worker {
 } *workers;
 
 
+static void propagate_signal(int sig, siginfo_t *info, void *ucontext){
+	for(int i = 0; i < list_size(workers); i++){
+		kill(workers[i].pid, sig);
+	}
+}
+
+void deinit(void);
+
+void quit(int sig, siginfo_t *info, void *ucontext){
+	log_info("Terminating due to SIG%s (%s)", sigabbrev_np(sig), sigdescr_np(sig));
+	propagate_signal(sig, info, ucontext);
+	deinit();
+	exit(0);
+}
+
+static void cleanup_worker(pid_t pid, int cleandir){
+	waitpid(pid, NULL, 0);
+	list_remove_entry(workers, pid);
+	if(cleandir){
+		str spid = utostr(pid, 10);
+		str workerfile = dup_strs(dir.workers, spid);
+		if(remove(workerfile.ptr) != 0){
+			log_error("Error cleaning up worker's %d file '%.*s': %s", pid, workerfile.len, workerfile.ptr, strerror(errno));
+		}
+		free_str(&workerfile);
+		free_str(&spid);
+	}
+}
+
+// TODO: look more into waitpid()
+// TODO: make a wrapper for sigabbrev_np
 void worker_undertaker(int sig, siginfo_t *info, void *ucontext){
 	if(sig == SIGCHLD && list_entry_exists(workers, info->si_pid)){
-		list_remove_entry(workers, info->si_pid);
-		log_warn("worker %d is dead. now workers size is %d", info->si_pid, list_size(workers));
+		switch(info->si_code){
+			case CLD_EXITED:
+				cleanup_worker(info->si_pid, 0);
+				log_info("Worker process %d exited normally with exit value %d",info->si_pid, info->si_status);
+				break;
+			case CLD_KILLED:
+				cleanup_worker(info->si_pid, 1);
+				log_info("Worker process %d was killed by signal SIG%s (%s)",
+					info->si_pid, sigabbrev_np(info->si_status), sigdescr_np(info->si_status));
+				break;
+			case CLD_DUMPED:
+				cleanup_worker(info->si_pid, 1);
+				log_info("Worker process %d was killed by signal SIG%s (%s) and produced a core dump",
+					info->si_pid, sigabbrev_np(info->si_status), sigdescr_np(info->si_status));
+				break;
+			case CLD_TRAPPED:
+				log_info("Worker process %d was trapped by signal %d", info->si_pid, info->si_status);
+				break;
+			case CLD_STOPPED:
+				log_info("Worker process %d was stopped by signal %d", info->si_pid, info->si_status);
+				break;
+			case CLD_CONTINUED:
+				log_info("Worker process %d was continued by signal %d", info->si_pid, info->si_status);
+				break;
+			default:
+				cleanup_worker(info->si_pid, 1);
+				log_info("Received SIGCHLD for process %d for some reason, with exit code/signal %d", info->si_pid, info->si_status);
+				break;
+		}
+		log_debug("Now workers size is %d", list_size(workers));
 	}
 }
 
@@ -42,24 +101,8 @@ int create_server_dir(str name){
 			return 1;
 		}
 	}
-	dir.sock_path = dup_strs(dir.path, sstr("socket/"));
-	log_info("creating sock path in %.*s", dir.sock_path.len, dir.sock_path.ptr);
-	if(!dir_exists(dir.sock_path.ptr)){
-	// TODO: else? how to reattach to socket? how to leave socket reattachable?
-	// TODO: look at ptrace(2)
-		if(mkdir(dir.sock_path.ptr, 0777) != 0){
-			log_error("Error creating socket directory in '%.*s': %s", dir.sock_path.len, dir.sock_path.ptr, strerror(errno));
-			return 1;
-		}
-	}
-	str sssocket = utostr(server->ssocket, 10);
-	dir.sock_addr = dup_strs(dir.sock_path, sssocket);
-	free_str(&sssocket);
-	log_info("creating sock in %.*s", dir.sock_addr.len, dir.sock_addr.ptr);
-	if(creat(dir.sock_addr.ptr, 0777) == -1){
-		log_error("Error creating socket file for server in '%.*s': %s", dir.sock_addr.len, dir.sock_addr.ptr, strerror(errno));
-		return 1;
-	}
+	dir.socket_file = dup_strs(dir.path, sstr("socket"));
+	dir.config_file = dup_strs(dir.path, sstr("configfile"));
 	dir.ipc_addr = dup_strs(dir.path, sstr("ipcserver"));
 	if(path_exists(dir.ipc_addr.ptr)){
 		if(remove(dir.ipc_addr.ptr) != 0){
@@ -77,13 +120,58 @@ int create_server_dir(str name){
 	return 0;
 }
 
+int copy_config_file(char *configfile, str dest){
+	str cff = map_file(configfile);
+	if(cff.ptr == NULL){
+		log_error("Error opening config file '%s'", configfile);
+		return 1;;
+	}
+	FILE *cfp = fopen(dest.ptr, "w");
+	if(cfp == NULL){
+		log_error("Error creating config file in '%.*s': %s", dest.len, dest.ptr, strerror(errno));
+		unmap_file(&cff);
+		return 1;
+	}
+	str_to_fp(cff, cfp);
+	fclose(cfp);
+	unmap_file(&cff);
+	return 0;
+}
+
+int write_server_socket(str socket_file, int ssocket){
+	// TODO: how to reattach to socket? how to leave socket reattachable? look at ptrace(2)
+	log_info("Creating socket file in %.*s", socket_file.len, socket_file.ptr);
+	int sfd = creat(socket_file.ptr, 0777);
+	if(sfd == -1){
+		log_error("Error creating socket file in '%.*s': %s", socket_file.len, socket_file.ptr, strerror(errno));
+		return 1;
+	}
+	write(sfd, &ssocket, sizeof(ssocket));
+	if(close(sfd) == -1){
+		log_error("Error closing the socket file '%.*s': %s", socket_file.len, socket_file.ptr, strerror(errno));
+		return 1;
+	}
+	return 0;
+}
+
 int init(char *configfile){
-	config = master_config(configfile);
-	if(config.name.len == 0){ // TODO: maybe check for this someway else
+	str file = map_file(configfile);
+	str name = get_key(file, sstr("name"));
+	unmap_file(&file);
+	if(create_server_dir(name) != 0){
+		free_str(&name);
+		return 1;
+	}
+	free_str(&name);
+	if(copy_config_file(configfile, dir.config_file) != 0){
+		return 1;
+	}
+	config = master_config(dir.config_file.ptr);
+	if(config.file.ptr == NULL){
 		log_error("Unable to read config from '%s'", configfile);
 		return 1;
 	}
-	print_master_config(config);
+	//print_master_config(config);
 	log_info("Succesfully read master config from '%s'", configfile);
 	// decouple so the whole net.c doesnt get linked?
 	server = setup_http_server(config.port, config.backlog);
@@ -91,32 +179,36 @@ int init(char *configfile){
 		log_error("Error setting up socket server");
 		return 1;
 	}
-	if(create_server_dir(config.name) != 0){
+	if(write_server_socket(dir.socket_file, server->ssocket)){
 		return 1;
 	}
-	// configurable name?
 	sender = setup_ipc_sender(dir.ipc_addr, IPC_BACKLOG);
 	if(sender == NULL){
 		log_error("Error setting up IPC sender");
 		return 1;
 	}
 	init_list(workers);
-	struct sigaction chld = { .sa_sigaction = worker_undertaker, .sa_flags = SA_SIGINFO };
+	struct sigaction chld = { .sa_sigaction = worker_undertaker, .sa_flags = SA_SIGINFO | SA_NOCLDSTOP };
 	if(sigaction(SIGCHLD, &chld, NULL) == -1){
 		log_error("Error setting up SIGCHLD signal handler: %s", strerror(errno));
 		return 1;
+	}
+	struct sigaction qit = { .sa_sigaction = quit, .sa_flags = SA_SIGINFO };
+	if(sigaction(SIGTERM, &qit, NULL) == -1){
+		log_error("Error setting up SIGTERM signal handler: %s", strerror(errno));
+		return 1;
+	}
+	if(sigaction(SIGQUIT, &qit, NULL) == -1){
+		log_error("Error setting up SIGQUIT signal handler: %s", strerror(errno));
+		return 1;
+	}
+	if(sigaction(SIGINT, &qit, NULL) == -1){
+		log_error("Error setting up SIGINT signal handler: %s", strerror(errno));
 	}
 	return 0;
 }
 
 void remove_server_dir(void){
-	if(remove(dir.sock_addr.ptr) != 0){
-		log_error("Error removing socket file in '%.*s': %s", dir.sock_addr.len, dir.sock_addr.ptr, strerror(errno));
-	}
-	if(remove(dir.sock_path.ptr) != 0){
-		log_error("Error removing socket path in '%.*s': %s", dir.sock_path.len, dir.sock_path.ptr, strerror(errno));
-	}
-	// remove workers entries first
 	if(remove(dir.workers.ptr) != 0){
 		log_error("Error removing workers directory in '%.*s': %s", dir.workers.len, dir.workers.ptr, strerror(errno));
 	}
@@ -125,6 +217,14 @@ void remove_server_dir(void){
 		log_error("Error removing IPC socket '%.*s': %s", dir.ipc_addr.len, dir.ipc_addr.ptr, strerror(errno));
 	}
 	free_str(&dir.ipc_addr);
+	if(remove(dir.config_file.ptr) != 0){
+		log_error("Error removing config file in '%.*s': %s", dir.config_file.len, dir.config_file.ptr, strerror(errno));
+	}
+	free_str(&dir.config_file);
+	if(remove(dir.socket_file.ptr) != 0){
+		log_error("Error removing socket file in '%.*s': %s", dir.socket_file.len, dir.socket_file.ptr, strerror(errno));
+	}
+	free_str(&dir.socket_file);
 	if(remove(dir.path.ptr) != 0){
 		log_error("Error removing server directory in '%.*s': %s", dir.path.len, dir.path.ptr, strerror(errno));
 	}
@@ -170,10 +270,6 @@ int main(int argc, char *argv[]){
 		return_value = 1;
 		goto DEINIT;
 	}
-	log_debug("test");
-	log_info("test");
-	log_warn("test");
-	log_error("test");
 
 #ifdef SHOW_IP
 	system("curl -s http://ipinfo.io/ip && echo");
@@ -206,31 +302,24 @@ int main(int argc, char *argv[]){
 			case 'f': case 'F':
 				pid_t nw = fork();
 				if(nw == 0){
-					char *args[] = {"./worker.exe", dir.ipc_addr.ptr, NULL};
+					char *args[] = {"./worker.exe", config.name.ptr, "&", NULL};
 					execv("./worker.exe", args);
 					log_error("Cannot exec worker: %s", strerror(errno));
 					return 1;
 				}
 				struct worker w = { .pid = nw, .wsocket = accept(sender->ssocket, NULL, NULL) };
 				list_push(workers, w);
-				send_ipc_message(w.wsocket, CERT, sstr("ssl/cert.pem"));
-				send_ipc_message(w.wsocket, KEY, sstr("ssl/key.pem"));
-				str ss = utostr(server->ssocket, 10);
-				send_ipc_message(w.wsocket, SOCKET, ss);
-				free_str(&ss);
-				send_ipc_message(w.wsocket, REWRITES, sstr("urirewrites"));
-				//send_ipc_message(w.wsocket, HTTPS, sstr(""));
 				break;
-			case 's':
-				for(int i = 0; i < list_size(workers); i++){
-					send_ipc_message(workers[i].wsocket, HTTPS, sstr(""));
-				}
-				break;
-			case 'S':
-				for(int i = 0; i < list_size(workers); i++){
-					send_ipc_message(workers[i].wsocket, HTTP, sstr(""));
-				}
-				break;
+			// case 's':
+			// 	for(int i = 0; i < list_size(workers); i++){
+			// 		send_ipc_message(workers[i].wsocket, HTTPS, sstr(""));
+			// 	}
+			// 	break;
+			// case 'S':
+			// 	for(int i = 0; i < list_size(workers); i++){
+			// 		send_ipc_message(workers[i].wsocket, HTTP, sstr(""));
+			// 	}
+			// 	break;
 			case 'R':
 				for(int i = 0; i < list_size(workers); i++){
 					send_ipc_message(workers[i].wsocket, RESTART, sstr(""));
@@ -256,7 +345,7 @@ int main(int argc, char *argv[]){
 			case 'q': case 'Q':
 				while(list_size(workers) > 0){
 					shutdown(workers[0].wsocket, SHUT_RDWR);
-					//kill(workers[0].pid, SIGQUIT); // redo this PLEASE
+					kill(workers[0].pid, SIGTERM); // redo this PLEASE
 					waitpid(workers[0].pid, NULL, 0);
 				}
 				while(wait(NULL) > 0);

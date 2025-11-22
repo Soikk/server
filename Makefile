@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -O0 -Wall -ggdb3
+CFLAGS = -O0 -Wall -ggdb3 -D_GNU_SOURCE
 LDFLAGS = -lssl -lcrypto
 
 SRCDIR = src
@@ -12,7 +12,7 @@ else
 	RUNCMD = ./server.exe
 endif
 
-OBJS = $(addprefix $(OBJDIR)/, bit.o files.o str.o log.o list.o crc64.o net.o ipc.o mime.o config.o)
+OBJS = $(addprefix $(OBJDIR)/, bit.o files.o str.o log.o list.o crc64.o net.o ipc.o mime.o rewrites.o config.o)
 
 INCL = -I$(LIBDIR) -I$(SRCDIR)
 

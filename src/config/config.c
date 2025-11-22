@@ -69,11 +69,15 @@ static void rotate_logs(str logs){
 config_m master_config(char *filename){
 	config_m conf = {0};
 	conf.file = map_file(filename);
+	if(conf.file.ptr == NULL){
+		log_error("Unable to open config file '%s'", filename);
+		return conf;
+	}
 	int off = 0;
 	while(off < conf.file.len){
 		while(off < conf.file.len && charisspace(conf.file.ptr[off])) off++;
 		if(conf.file.ptr[off] == '#'){
-			while(off < conf.file.len && !charislinebreak(conf.file.ptr[off])) off++;
+			while(off < conf.file.len && !charislinebreak(conf.file.ptr[off++]));
 			continue;
 		}
 		str key = sread_delim_f(conf.file.ptr + off, charisspace, true);
@@ -83,6 +87,7 @@ config_m master_config(char *filename){
 		if(streq(key, sstr("name"))){
 			conf.name = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += conf.name.len;
+			conf.file.ptr[off] = '\0';
 		}else if(streq(key, sstr("port"))){
 			str val = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += val.len;
@@ -116,8 +121,7 @@ config_m master_config(char *filename){
 		}else if(key.len != 0){
 			log_warn("Unexpected entry in configuration: '%.*s'", key.len, key.ptr);
 		}
-		while(off < conf.file.len && !charislinebreak(conf.file.ptr[off])) off++;
-		off++;
+		while(off < conf.file.len && !charislinebreak(conf.file.ptr[off++]));
 	};
 
 	return conf;
@@ -135,7 +139,7 @@ config_w worker_config(char *filename){
 	while(off < conf.file.len){
 		while(off < conf.file.len && charisspace(conf.file.ptr[off])) off++;
 		if(conf.file.ptr[off] == '#'){
-			while(off < conf.file.len && !charislinebreak(conf.file.ptr[off])) off++;
+			while(off < conf.file.len && !charislinebreak(conf.file.ptr[off++]));
 			continue;
 		}
 		str key = sread_delim_f(conf.file.ptr + off, charisspace, true);
@@ -145,20 +149,23 @@ config_w worker_config(char *filename){
 		if(streq(key, sstr("name"))){
 			conf.name = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += conf.name.len;
+			conf.file.ptr[off] = '\0';
 		}else if(streq(key, sstr("root"))){
-			str val = sread_delim_f(conf.file.ptr + off, charisspace, true);
-			off += val.len;
-			str trailslash = val.ptr[val.len-1] == '/' ? sstr("") : sstr("/");
-			conf.root = dup_strs(val, trailslash);
+			conf.root = sread_delim_f(conf.file.ptr + off, charisspace, true);
+			off += conf.root.len;
+			conf.file.ptr[off] = '\0';
 		}else if(streq(key, sstr("bundle"))){
 			conf.bundle = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += conf.bundle.len;
+			conf.file.ptr[off] = '\0';
 		}else if(streq(key, sstr("cert"))){
 			conf.cert = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += conf.cert.len;
+			conf.file.ptr[off] = '\0';
 		}else if(streq(key, sstr("key"))){
 			conf.key = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += conf.key.len;
+			conf.file.ptr[off] = 0;
 		}else if(streq(key, sstr("https"))){
 			conf.secure = 1;
 		}else if(streq(key, sstr("http"))){
@@ -181,6 +188,20 @@ config_w worker_config(char *filename){
 				off += types.len;
 			}
 			read_mime_types(types);
+		}else if(streq(key, sstr("rewrites"))){
+			str val = sread_delim_f(conf.file.ptr + off, charisspace, true);
+			off += val.len;
+			str rewrites;
+			if(val.ptr[0] != '{'){
+				str rewritesfile = dup_str(val);
+				rewrites = map_file(rewritesfile.ptr);
+				list_push(conf.files, rewrites);
+				free_str(&rewritesfile);
+			}else{
+				rewrites = sread_delim(conf.file.ptr + off, '}');
+				off += rewrites.len;
+			}
+			read_url_rewrites(rewrites);
 		}else if(streq(key, sstr("logs"))){
 			str val = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += val.len;
@@ -196,11 +217,30 @@ config_w worker_config(char *filename){
 			rotate_logs(logs);
 			free_str(&logs);
 		}
-		while(off < conf.file.len && !charislinebreak(conf.file.ptr[off])) off++;
-		off++;
+		while(off < conf.file.len && !charislinebreak(conf.file.ptr[off++]));
 	};
 
 	return conf;
+}
+
+str get_key(str file, str key){
+	int off = 0;
+	while(off < file.len){
+		while(off < file.len && charisspace(file.ptr[off])) off++;
+		if(file.ptr[off] == '#'){
+			while(off < file.len && !charislinebreak(file.ptr[off])) off++;
+			continue;
+		}
+		str candidate = sread_delim_f(file.ptr + off, charisspace, true);
+		off += candidate.len;
+		while(off < file.len && charisspace(file.ptr[off]) && !charislinebreak(file.ptr[off])) off++;
+		if(streq(key, candidate)){
+			return read_delim_f(file.ptr + off, charisspace, true);
+		}
+		while(off < file.len && !charislinebreak(file.ptr[off])) off++;
+		off++;
+	}
+	return (str){0};
 }
 
 void free_master_config(config_m *conf){
@@ -220,6 +260,7 @@ void free_worker_config(config_w *conf){
 	conf->ipv4 = 0;
 	conf->ipv6 = 0;
 	free_mime_types();
+	free_url_rewrites();
 	for(int i = 0; i < list_size(conf->files); i++){
 		unmap_file(&conf->files[i]);
 	}
@@ -271,6 +312,7 @@ void print_worker_config(config_w conf){
 		conf.ipv6 ? "yes" : "no"
 	);
 	print_mime_types();
+	print_url_rewrites();
 	printf("\t- logs:    {\n");
 	for(int i = 0; i < LOG_LEVEL_COUNT; i++){
 		switch(i){

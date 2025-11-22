@@ -20,6 +20,7 @@
 #include "files/files.h"
 #include "log/log.h"
 #include "mime/mime.h"
+#include "rewrites/rewrites.h"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <poll.h>
@@ -35,16 +36,6 @@ typedef enum http_method {
 } http_method;
 
 
-struct uri {
-	str path;
-	str query;
-};
-
-struct uri_mod {
-	str pattern;
-	struct uri output;
-};
-
 struct header {
 	str name;
 	str value;
@@ -59,7 +50,7 @@ struct http_message {
 		str resp_ver;
 	};
 	union {
-		str uri;
+		str url;
 		str status;
 	};
 	union {
@@ -106,7 +97,7 @@ int accept_connection(http_worker *hw, char ip[INET_ADDRSTRLEN]);
 
 int receive_request(http_worker *hw, str *request);
 
-str generate_resource(struct uri resource, str url);
+str generate_resource(url resource, str rurl);
 
 char *handlePOST(char *request);
 
@@ -114,12 +105,8 @@ void build_http_message(char *request, int len, struct http_message *hm);
 
 enum http_method get_http_method(str method);
 
-struct uri sanitize_uri(str uri);
+url sanitize_url(str rurl);
 
 void send_file(http_worker *hw, str filename);
-
-int read_uri_rewrites(char *map, uint64_t size);
-
-void free_uri_rewrites(void);
 
 #endif

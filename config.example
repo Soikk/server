@@ -1,7 +1,7 @@
 # lines that start with # are skipped
 name		website.com	# name of the server. the # isnt really needed here as the config reader skips to the next line once it reads the needed value
-port		443		# port the server will be running on
-backlog		15		# backlog for the socket
+port		80			# port the server will be running on
+backlog		15			# backlog for the socket
 logs {
 	# adds logging (for all processes) to specified files, and can turn logging to stderr off (0) or on (not 0)
 	# log level	log file	read mode
@@ -16,12 +16,18 @@ logs {
 worker {
 	root	/home/user/server/	# where the server will look for files, basically files prefix
 	bundle	/ca/bundle/location	# location of ca bundle
-	cert	/certificate/location	# location of certificate
-	key	/key/location		#location of private key
+	cert	ssl/cert.pem	# location of certificate
+	key		ssl/key.pem		#location of private key
 	http	# turns https off
-	https	# turns https on
+	# https	# turns https on
 	ipv4	# ipv4 enabled
 	ipv6	# ipv6 enabled
+	rewrites {
+		/ test/monch.gif
+		/media/* localc/media/$1
+		/* test/$1
+	}
+	# rewrites rewrites.txt # file from where to read rewrites
 	types	mime.types	# file from where to read types
 	types {
 		# reading types from config directly

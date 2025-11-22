@@ -5,6 +5,7 @@
 #include "log/log.h"
 #include "list/list.h"
 #include "mime/mime.h"
+#include "rewrites/rewrites.h"
 #include <errno.h>
 
 
@@ -31,6 +32,8 @@ typedef struct config_w {
 
 config_m master_config(char *filename);
 config_w worker_config(char *filename);
+
+str get_key(str file, str key);
 
 void free_master_config(config_m *conf);
 void free_worker_config(config_w *conf);

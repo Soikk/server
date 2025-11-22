@@ -12,8 +12,6 @@ str response_headers[] = {
 	sstr("Transfer-Encoding"),
 };
 
-LIST(struct uri_mod) uri_rewrites = NULL;
-
 static int pleasesslgivemetheerror(int ssl_get_error){
 	char *error;
 	switch(ssl_get_error){
@@ -145,11 +143,11 @@ int setup_https(http_worker *hw, str certfile, str keyfile){
 		return 1;
 	}*/
 	if(SSL_CTX_use_certificate_file(hw->ssl_ctx, certfile.ptr, SSL_FILETYPE_PEM) <= 0){
-		log_error("Using certificate file");
+		log_error("Error while trying to set up certificate file");
 		return 1;
 	}
 	if(SSL_CTX_use_PrivateKey_file(hw->ssl_ctx, keyfile.ptr, SSL_FILETYPE_PEM) <= 0 ){
-		log_error("Using private key file");
+		log_error("Error while trying to set up key file");
 		return 1;
 	}
 	hw->ssl = SSL_new(hw->ssl_ctx);
@@ -193,7 +191,7 @@ int accept_connection(http_worker *hw, char ip[INET_ADDRSTRLEN]){
 	int casize = sizeof(caddr);
 	log_info("Waiting...");
 	if((hw->csocket = accept(hw->ssocket, (struct sockaddr *)&caddr, (socklen_t*)&casize)) == -1){
-		log_error("accept_socket() -> accept(): %s", strerror(errno));
+		log_error("accept_connection() -> accept(): %s", strerror(errno));
 		return -1;
 	}
 	log_info("accepted");
@@ -221,46 +219,56 @@ static inline int worker_read(http_worker *hw, str *buf){
 int receive_request(http_worker *hw, str *request){
 	// SSL_has_pending can return 0 if you havent read any bytes yet (https://stackoverflow.com/questions/6616976/why-does-this-ssl-pending-call-always-return-zero)
 	struct pollfd pfd[1] = { {.fd = hw->csocket, .events = POLLIN } };
-	while((hw->secure && SSL_has_pending(hw->ssl)) || poll(pfd, 1, 100)){
-		int new = worker_read(hw, request);
-		if(new < 0 || (hw->secure && new == 0)){
-			int error = new;
-			if(hw->secure) error = pleasesslgivemetheerror(SSL_get_error(hw->ssl, new));
-			else log_error("http (no s) error: %s", strerror(errno));
-			return error;
-		}
-		request->len += new;
-		if(request->len == request->cap){
-			log_info("gotta resize buffer");
-			if(resize_str(request, request->cap*2) != 0){
-				log_error("Not enough memory in reply str");
-				return -1;
+	while(poll(pfd, 1, 100)){
+		if(pfd[0].revents & POLLIN){
+			int rb = 0;
+			if(hw->secure){
+				if(SSL_has_pending(hw->ssl)){
+					rb = worker_read(hw, request);
+					if(rb == 0){
+						return pleasesslgivemetheerror(SSL_get_error(hw->ssl, rb));
+					}
+				}
+			}else{
+				rb = worker_read(hw, request);
+				if(rb == 0){
+					if(request->len == 0){
+						return -1;
+					}
+					return 0;
+				}
+				if(rb < 0){
+					return rb;
+				}
 			}
+			request->len += rb;
+			if(request->len == request->cap){
+				log_debug("gotta resize buffer");
+				if(resize_str(request, request->cap*2) != 0){
+					log_error("Not enough memory in reply str");
+					return -1;
+				}
+			}
+		}else{
+			log_error("Socket returned revents '%d'", pfd[0].revents);
 		}
 	}
 	return 0;
 }
 
-str generate_resource(struct uri resource, str url){
-	str file = {0};
+str generate_resource(url resource, str rurl){
 	/*
 		generate if all of these are true
 		1) no file specified (aka we need index.html)
 		2) theres an index.html.php
 		3) index.html isnt cached (future)
 	*/
-	str phpfile = dnstr(resource.path.len + slen(".php"));
-	copy_strs(phpfile, resource.path, sstr(".php"));
+	str phpfile = dup_strs(resource.path, sstr(".php"));
 	if(access(phpfile.ptr, F_OK) == 0){
 		// we need a str_copy or something
-		str command = dnstr(
-			slen("REQUEST_URI='") + resource.path.len + slen("' QUERY_STRING='") + resource.query.len +
-			slen("' URL='") + url.len +
-			slen("' php -c ./ ") + phpfile.len + slen(" > ") + resource.path.len
-		);
-		copy_strs(command,
+		str command = dup_strs(command,
 			sstr("REQUEST_URI='"), resource.path, sstr("' QUERY_STRING='"), resource.query,
-			sstr("' URL='"), url,
+			sstr("' URL='"), rurl,
 			sstr("' php -c ./ "), phpfile, sstr(" > "), resource.path
 		);
 		log_warn("command: %s", command.ptr);
@@ -268,7 +276,7 @@ str generate_resource(struct uri resource, str url){
 		free_str(&command);
 	}
 	free_str(&phpfile);
-	file = dup_str(resource.path);
+	str file = dup_str(resource.path);
 /*
 	if(uri.query.len > 0){
 		if(access(uri.path.ptr, F_OK) != 0){
@@ -343,8 +351,8 @@ void build_http_message(char *request, int rlen, struct http_message *hm){
 	while(request < end && *request != ' ') hm->method.len++, request++;
 	if(++request >= end) return;
 
-	hm->uri.ptr = request;
-	while(request < end && *request != ' ') hm->uri.len++, request++;
+	hm->url.ptr = request;
+	while(request < end && *request != ' ') hm->url.len++, request++;
 	if(++request >= end) return;
 
 	hm->req_ver.ptr = request;
@@ -393,7 +401,7 @@ __attribute__ ((optimize(3))) http_method get_http_method(str method){
 
 static uint64_t http_len(struct http_message *hm){
 	uint64_t len = 0;
-	len += hm->method.len + hm->uri.len + hm->req_ver.len + 5 + 2;
+	len += hm->method.len + hm->url.len + hm->req_ver.len + 5 + 2;
 	for(int i = 0; i < hm->hlen; ++i){
 		len += hm->headers[i].name.len + hm->headers[i].value.len + 4;
 	}
@@ -420,7 +428,7 @@ static uint64_t http_len(struct http_message *hm){
 static str http_header_to_str(struct http_message *hm){
 	str s = {0};
 	s.ptr = calloc(http_len(hm) + 1, sizeof(char));
-	copy_strs(s, hm->method, sstr(" "), hm->uri, sstr(" "), hm->req_ver, sstr("\r\n"));
+	copy_strs(s, hm->method, sstr(" "), hm->url, sstr(" "), hm->req_ver, sstr("\r\n"));
 	for(int i = 0; i < hm->hlen; i++){
 		copy_strs(s, hm->headers[i].name, sstr(": "), hm->headers[i].value, sstr("\r\n"));
 	}
@@ -428,110 +436,28 @@ static str http_header_to_str(struct http_message *hm){
 	return s;	
 }
 
-/*
-	Given two strings p and u, and a uri (a struct with two strings) o
-	where p is a pattern, u is a url that is gonna checked for the pattern
-	and o is the uri output blueprint that must be returned should u follow p
 
-	There is a tokens array where tokens found in the url can be stored (up to 9 tokens)
-
-	In p:
-		<X> optionally matches a character X and stores it in the tokens array 
-		^ optionally matches any character and stores it in the tokens array
-		* optionally matches a string of character until another match is found
-		  or the url to match ends, and stores it in the tokens array
-
-	In o:
-		$1 through $9 reference the tokens in the token array (I could make it 10 tokens tbh)
-		Both the strings in the uri can access these tokens
-		Referencing a token writes it to the output uri
-		If theres a token before a <X>, say $3<a> that means that the character
-		between the less than and greater than signs will only be written
-		to the output if the token number 3 in the array exists (has length > 0)
-		All other characters get outputted normally
-*/
-static struct uri uri_rewrite(str p, str u, struct uri o){
-	int i = 0, j = 0, in = 0, ti = 0;
-	str tokens[9] = {0};
-	for(; j < p.len; i += 1){
-		if(i < u.len && p.ptr[j+in] == '<' && p.ptr[j+in+1] == u.ptr[i]){
-			if(ti < 9) tokens[ti++] = (str){.ptr = u.ptr+i, .len = 1};
-			j += 3+in, in = 0;
-		}else if(i < u.len && (p.ptr[j+in] == '^' || p.ptr[j+in] == u.ptr[i])){
-			if(p.ptr[j] == '^' && ti < 9) tokens[ti++] = (str){.ptr = u.ptr+i, .len = 1};
-			j += 1+in, in = 0;
-		}else if(i < u.len && p.ptr[j] == '*'){
-			if(!in){
-				if(ti < 9) tokens[ti++] = (str){.ptr = u.ptr+i, .len = 0};
-				in = 1;
-			}
-			if(ti-in < 9) tokens[ti-in].len++;
-		}else{
-			if(i >= u.len && p.ptr[j] == '*') j++;
-			else if(i >= u.len && p.ptr[j] == '<') j += 3;
-			else return (struct uri){0};
-		}
-	}
-	if(i < u.len) return (struct uri){0};
-
-	struct uri r = {0};
-	str *no = &o.path, *nr = &r.path;
-	for(int k = 0, rlen = 0; k < 2; k++, no = &o.query, nr = &r.query){
-		for(int i = 0; i < no->len; i++, rlen++){
-			if(no->ptr[i] == '$') rlen += tokens[no->ptr[++i]-'1'].len-1;
-		}
-		nr->ptr = calloc(rlen+1, sizeof(char));
-		if(nr->ptr == NULL){
-			if(r.path.ptr != NULL) free(r.path.ptr);
-			return (struct uri){0};
-		}
-
-		for(int i = 0; i < no->len; i++){
-			if(no->ptr[i] == '$'){
-				if(++i+1 < no->len && no->ptr[i+1] == '<'){
-					if(tokens[no->ptr[i]-'1'].len > 0) i++;
-					else while(no->ptr[++i] != '>');
-				}else{
-					copy_str((*nr), tokens[no->ptr[i]-'1']);
-				}
-			}else{
-				if(no->ptr[i] != '>') nr->ptr[nr->len++] = no->ptr[i];
-			}
-		}
-	}
-
-	return r;
-}
-
-struct uri sanitize_uri(str uri){
-	str suri = {.ptr = calloc(uri.len+1, sizeof(char)), .len = 0};
-	if(suri.ptr == NULL) return (struct uri){0};
-	int i = 0, o = 0;
-	while(i+o < uri.len){
-		suri.ptr[i] = lowerchar(uri.ptr[i+o]);
-		if(i > 0 && (
-			(uri.ptr[i+o] == '/' && uri.ptr[i+o-1] == '/') ||
-			(uri.ptr[i+o] == '.' && uri.ptr[i+o-1] == '.') ||
-			(uri.ptr[i+o] == '/' && i+o+1 == uri.len) ||
-			uri.ptr[i+o] == '%')
+url sanitize_url(str rurl){
+	str srurl = dnstr(rurl.len);
+	if(srurl.ptr == NULL) return (url){0};
+	int o = 0;
+	while(srurl.len+o < rurl.len){
+		srurl.ptr[srurl.len] = lowerchar(rurl.ptr[srurl.len+o]);
+		if(srurl.len > 0 && (
+			(rurl.ptr[srurl.len+o] == '/' && rurl.ptr[srurl.len+o-1] == '/') ||
+			(rurl.ptr[srurl.len+o] == '.' && rurl.ptr[srurl.len+o-1] == '.') ||
+			(rurl.ptr[srurl.len+o] == '/' && srurl.len+o+1 == rurl.len) ||
+			rurl.ptr[srurl.len+o] == '%')
 		){
 			++o;
 		}else{
-			++i;
+			srurl.len++;
 		}
 	}
-	suri.ptr[suri.len = i] = '\0';
-	
-	struct uri u = {0};
-	for(int i = 0; i < list_size(uri_rewrites); i++){
-		u = uri_rewrite(uri_rewrites[i].pattern, suri, uri_rewrites[i].output);
-		if(u.path.len > 0) break;
-	}
-	free_str(&suri);
-	if(u.path.len == 0){
-		u.path = dstr("localc/404/index.html");
-		free_str(&u.query);
-	}
+	log_debug("before:\t'%.*s'", rurl.len, rurl.ptr);
+	log_debug("after:\t'%.*s'", srurl.len, srurl.ptr);
+	url u = url_check(srurl);
+	free_str(&srurl);
 	return u;
 }
 
@@ -611,36 +537,3 @@ void send_file(http_worker *hw, str filename){
 	}
 	close(fd);
 }
-
-// this shouldnt be here
-int read_uri_rewrites(char *map, uint64_t size){
-	uint64_t i = 0;
-	if(strncmp(map, "rewrites", slen("rewrites")) != 0) return 1;
-	i += slen("rewrites");
-	while(charisspace(map[i])) i++;
-	if(map[i++] != '{') return 1;
-	list_free(uri_rewrites);
-	init_nlist(uri_rewrites);
-	while(i < size && map[i] != '}'){
-		struct uri_mod um = {0};
-		i += ({sread_delim_f(map+i, charisspace, false);}).len;
-		i += ({um.pattern = read_delim_f(map+i, charisspace, true);}).len;
-		i += ({sread_delim_f(map+i, charisblank, false);}).len;
-		i += ({um.output.path = read_delim_f(map+i, charisspace, true);}).len;
-		i += ({sread_delim_f(map+i, charisblank, false);}).len;
-		i += ({um.output.query = read_delim_f(map+i, charisspace, true);}).len;
-		i += ({sread_delim(map+i, '\n');}).len + 1;
-		list_push(uri_rewrites, um);
-	}
-	return 0;
-}
-
-void free_uri_rewrites(void){
-	for(uint32_t i = 0; i < list_size(uri_rewrites); i++){
-		free_str(&uri_rewrites[i].pattern);
-		free_str(&uri_rewrites[i].output.path);
-		free_str(&uri_rewrites[i].output.query);
-	}
-	list_free(uri_rewrites);
-}
-
