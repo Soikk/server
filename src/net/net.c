@@ -442,7 +442,7 @@ url sanitize_url(str rurl){
 	if(srurl.ptr == NULL) return (url){0};
 	int o = 0;
 	while(srurl.len+o < rurl.len){
-		srurl.ptr[srurl.len] = lowerchar(rurl.ptr[srurl.len+o]);
+		srurl.ptr[srurl.len] = rurl.ptr[srurl.len+o];
 		if(srurl.len > 0 && (
 			(rurl.ptr[srurl.len+o] == '/' && rurl.ptr[srurl.len+o-1] == '/') ||
 			(rurl.ptr[srurl.len+o] == '.' && rurl.ptr[srurl.len+o-1] == '.') ||
