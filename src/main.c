@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/wait.h>
-#include <time.h>
+//#include <time.h>
+#include <libgen.h>
 #include "str/str.h"
 #include "list/list.h"
 #include "net/net.h"
@@ -11,7 +12,8 @@
 
 #define IPC_BACKLOG 15
 
-config_m config;
+str name;
+str orig_config_file;
 struct {
 	str path;
 	str socket_file;
@@ -19,6 +21,7 @@ struct {
 	str config_file;
 	str workers;
 } dir;
+config_m config;
 http_server *server;
 ipc_sender *sender;
 struct worker {
@@ -27,7 +30,8 @@ struct worker {
 } *workers;
 
 
-static void propagate_signal(int sig, siginfo_t *info, void *ucontext){
+// TODO: waitpid here?
+static void propagate_signal(int sig){
 	for(int i = 0; i < list_size(workers); i++){
 		kill(workers[i].pid, sig);
 	}
@@ -35,9 +39,9 @@ static void propagate_signal(int sig, siginfo_t *info, void *ucontext){
 
 void deinit(void);
 
-void quit(int sig, siginfo_t *info, void *ucontext){
+static void quit(int sig, siginfo_t *info, void *ucontext){
 	log_info("Terminating due to SIG%s (%s)", sigabbrev_np(sig), sigdescr_np(sig));
-	propagate_signal(sig, info, ucontext);
+	propagate_signal(sig);
 	deinit();
 	exit(0);
 }
@@ -58,7 +62,7 @@ static void cleanup_worker(pid_t pid, int cleandir){
 
 // TODO: look more into waitpid()
 // TODO: make a wrapper for sigabbrev_np
-void worker_undertaker(int sig, siginfo_t *info, void *ucontext){
+static void worker_undertaker(int sig, siginfo_t *info, void *ucontext){
 	if(sig == SIGCHLD && list_entry_exists(workers, info->si_pid)){
 		switch(info->si_code){
 			case CLD_EXITED:
@@ -93,7 +97,7 @@ void worker_undertaker(int sig, siginfo_t *info, void *ucontext){
 	}
 }
 
-int create_server_dir(str name){
+static int create_server_dir(str name){
 	dir.path = dup_strs(sstr("/var/run/"), name, sstr("/"));
 	if(!dir_exists(dir.path.ptr)){
 		if(mkdir(dir.path.ptr, 0777) != 0){
@@ -120,11 +124,11 @@ int create_server_dir(str name){
 	return 0;
 }
 
-int copy_config_file(char *configfile, str dest){
-	str cff = map_file(configfile);
+static int copy_config_file(str configfile, str dest){
+	str cff = map_file(configfile.ptr);
 	if(cff.ptr == NULL){
-		log_error("Error opening config file '%s'", configfile);
-		return 1;;
+		log_error("Error opening config file '%.*s'", configfile.len, configfile.ptr);
+		return 1;
 	}
 	FILE *cfp = fopen(dest.ptr, "w");
 	if(cfp == NULL){
@@ -138,9 +142,9 @@ int copy_config_file(char *configfile, str dest){
 	return 0;
 }
 
-int write_server_socket(str socket_file, int ssocket){
+static int write_server_socket(str socket_file, int ssocket){
 	// TODO: how to reattach to socket? how to leave socket reattachable? look at ptrace(2)
-	log_info("Creating socket file in %.*s", socket_file.len, socket_file.ptr);
+	log_debug("Creating socket file in %.*s", socket_file.len, socket_file.ptr);
 	int sfd = creat(socket_file.ptr, 0777);
 	if(sfd == -1){
 		log_error("Error creating socket file in '%.*s': %s", socket_file.len, socket_file.ptr, strerror(errno));
@@ -154,40 +158,74 @@ int write_server_socket(str socket_file, int ssocket){
 	return 0;
 }
 
+static void reinit(int sig, siginfo_t *info, void *ucontext){
+	if(sig == SIGUSR1){
+		log_info("Reinitializing server");
+		propagate_signal(sig);
+		free_master_config(&config);
+		destroy_http_server(&server);
+
+		if(copy_config_file(orig_config_file, dir.config_file)){
+			log_error("Unable to create configuration file in server directory");
+			quit(SIGTERM, NULL, NULL);
+		}
+		config = master_config(dir.config_file.ptr);
+		if(config.file.ptr == NULL){
+			log_error("Unable to read config from '%.*s'", dir.config_file.len, dir.config_file.ptr);
+			quit(SIGTERM, NULL, NULL);
+		}
+		server = setup_http_server(config.port, config.backlog);
+		if(server == NULL){
+			log_error("Unable to set up socket server");
+			quit(SIGTERM, NULL, NULL);
+		}
+		if(write_server_socket(dir.socket_file, server->ssocket)){
+			log_error("Unable to write socket to socket file");
+			quit(SIGTERM, NULL, NULL);
+		}
+
+		propagate_signal(SIGCONT);
+	}
+}
+
 int init(char *configfile){
-	str file = map_file(configfile);
-	str name = get_key(file, sstr("name"));
-	unmap_file(&file);
+	name = dsstr(basename(configfile));
+	orig_config_file = dsstr(configfile);
 	if(create_server_dir(name) != 0){
-		free_str(&name);
+		log_error("Unable to create server directory");
 		return 1;
 	}
-	free_str(&name);
-	if(copy_config_file(configfile, dir.config_file) != 0){
+	if(copy_config_file(orig_config_file, dir.config_file) != 0){
+		log_error("Unable to create configuration file in server directory");
 		return 1;
 	}
 	config = master_config(dir.config_file.ptr);
 	if(config.file.ptr == NULL){
-		log_error("Unable to read config from '%s'", configfile);
+		log_error("Unable to read config from '%.*s'", dir.config_file.len, dir.config_file.ptr);
 		return 1;
 	}
-	//print_master_config(config);
-	log_info("Succesfully read master config from '%s'", configfile);
+	log_info("Succesfully read master config from '%.*s'", dir.config_file.len, dir.config_file.ptr);
 	// decouple so the whole net.c doesnt get linked?
 	server = setup_http_server(config.port, config.backlog);
 	if(server == NULL){
-		log_error("Error setting up socket server");
+		log_error("Unable to set up socket server");
 		return 1;
 	}
 	if(write_server_socket(dir.socket_file, server->ssocket)){
+		log_error("Unable to write socket to socket file");
 		return 1;
 	}
 	sender = setup_ipc_sender(dir.ipc_addr, IPC_BACKLOG);
 	if(sender == NULL){
-		log_error("Error setting up IPC sender");
+		log_error("Unable to set up IPC sender");
 		return 1;
 	}
 	init_list(workers);
+	struct sigaction rnit = { .sa_sigaction = reinit, .sa_flags = SA_SIGINFO };
+	if(sigaction(SIGUSR1, &rnit, NULL) == -1){
+		log_error("Error setting up SIGUSR1 signal handler: %s", strerror(errno));
+		return 1;
+	}
 	struct sigaction chld = { .sa_sigaction = worker_undertaker, .sa_flags = SA_SIGINFO | SA_NOCLDSTOP };
 	if(sigaction(SIGCHLD, &chld, NULL) == -1){
 		log_error("Error setting up SIGCHLD signal handler: %s", strerror(errno));
@@ -208,25 +246,35 @@ int init(char *configfile){
 	return 0;
 }
 
-void remove_server_dir(void){
-	if(remove(dir.workers.ptr) != 0){
-		log_error("Error removing workers directory in '%.*s': %s", dir.workers.len, dir.workers.ptr, strerror(errno));
+static void remove_server_dir(void){
+	if(dir_exists(dir.workers.ptr)){
+		if(remove(dir.workers.ptr) != 0){
+			log_error("Error removing workers directory in '%.*s': %s", dir.workers.len, dir.workers.ptr, strerror(errno));
+		}
 	}
 	free_str(&dir.workers);
-	if(remove(dir.ipc_addr.ptr) != 0){
-		log_error("Error removing IPC socket '%.*s': %s", dir.ipc_addr.len, dir.ipc_addr.ptr, strerror(errno));
+	if(file_exists(dir.ipc_addr.ptr)){
+		if(remove(dir.ipc_addr.ptr) != 0){
+			log_error("Error removing IPC socket '%.*s': %s", dir.ipc_addr.len, dir.ipc_addr.ptr, strerror(errno));
+		}
 	}
 	free_str(&dir.ipc_addr);
-	if(remove(dir.config_file.ptr) != 0){
-		log_error("Error removing config file in '%.*s': %s", dir.config_file.len, dir.config_file.ptr, strerror(errno));
+	if(file_exists(dir.config_file.ptr)){
+		if(remove(dir.config_file.ptr) != 0){
+			log_error("Error removing config file in '%.*s': %s", dir.config_file.len, dir.config_file.ptr, strerror(errno));
+		}
 	}
 	free_str(&dir.config_file);
-	if(remove(dir.socket_file.ptr) != 0){
-		log_error("Error removing socket file in '%.*s': %s", dir.socket_file.len, dir.socket_file.ptr, strerror(errno));
+	if(file_exists(dir.socket_file.ptr)){
+		if(remove(dir.socket_file.ptr) != 0){
+			log_error("Error removing socket file in '%.*s': %s", dir.socket_file.len, dir.socket_file.ptr, strerror(errno));
+		}
 	}
 	free_str(&dir.socket_file);
-	if(remove(dir.path.ptr) != 0){
-		log_error("Error removing server directory in '%.*s': %s", dir.path.len, dir.path.ptr, strerror(errno));
+	if(dir_exists(dir.path.ptr)){
+		if(remove(dir.path.ptr) != 0){
+			log_error("Error removing server directory in '%.*s': %s", dir.path.len, dir.path.ptr, strerror(errno));
+		}
 	}
 	free_str(&dir.path);
 }
@@ -302,7 +350,7 @@ int main(int argc, char *argv[]){
 			case 'f': case 'F':
 				pid_t nw = fork();
 				if(nw == 0){
-					char *args[] = {"./worker.exe", config.name.ptr, "&", NULL};
+					char *args[] = {"./worker.exe", name.ptr, "&", NULL};
 					execv("./worker.exe", args);
 					log_error("Cannot exec worker: %s", strerror(errno));
 					return 1;
@@ -320,10 +368,11 @@ int main(int argc, char *argv[]){
 			// 		send_ipc_message(workers[i].wsocket, HTTP, sstr(""));
 			// 	}
 			// 	break;
-			case 'R':
-				for(int i = 0; i < list_size(workers); i++){
-					send_ipc_message(workers[i].wsocket, RESTART, sstr(""));
-				}
+			case 'r': case 'R':
+				kill(getpid(), SIGUSR1);
+				//for(int i = 0; i < list_size(workers); i++){
+				//	send_ipc_message(workers[i].wsocket, RESTART, sstr(""));
+				//}
 				break;
 			case 'l': case 'L':
 				printf("|-%3d workers working for us rn-|\n", list_size(workers));

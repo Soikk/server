@@ -111,6 +111,51 @@ void quit(int sig, siginfo_t *info, void *ucontext){
 	exit(0);
 }
 
+int signal_wait(int sig){
+	sigset_t old, new;
+	sigemptyset(&new);
+	sigaddset(&new, sig);
+	if(sigprocmask(SIG_BLOCK, &new, &old) != 0){
+		return 1;
+	}
+	// TODO: try with NULL
+	int s;
+	if(sigwait(&new, &s) != 0){
+		return 1;
+	}
+	if(sigprocmask(SIG_SETMASK, &old, NULL) != 0){
+		return 1;
+	}
+	return 0;
+}
+
+void reinit(int sig, siginfo_t *info, void *ucontext){
+	if(sig == SIGUSR1){
+		log_info("Reinitializing worker");
+		free_worker_config(&config);
+		destroy_http_worker(&worker);
+
+		if(signal_wait(SIGCONT) != 0){
+			log_error("You should probably look at signal_wait to see wtf is going on");
+		}
+
+		config = worker_config(dir.config_file.ptr);
+		if(config.file.ptr == NULL){
+			log_error("Unable to read config from '%.*s'", dir.config_file.len, dir.config_file.ptr);
+			quit(SIGTERM, NULL, NULL);
+		}
+		int sfd = open(dir.socket_path.ptr, O_RDONLY);
+		int ssocket;
+		read(sfd, &ssocket, sizeof(int));
+		close(sfd);
+		worker = setup_http_worker(ssocket, secure, config.cert, config.key);
+		if(worker == NULL){
+			log_error("Error setting up worker server");
+			quit(SIGTERM, NULL, NULL);
+		}
+	}
+}
+
 // possibly change name
 int read_server_dir(str name){
 	dir.path = dup_strs(sstr("/var/run/"), name, sstr("/"));
@@ -161,8 +206,8 @@ int init(str name){
 	//print_worker_config(config);
 	// TODO: remove "successful" messages or add them all	
 	log_info("Succesfully read worker config from '%.*s'", dir.config_file.len, dir.config_file.ptr);
-	int ssocket;
 	int sfd = open(dir.socket_path.ptr, O_RDONLY);
+	int ssocket;
 	read(sfd, &ssocket, sizeof(int));
 	close(sfd);
 	worker = setup_http_worker(ssocket, secure, config.cert, config.key);
@@ -173,6 +218,11 @@ int init(str name){
 	listener = setup_ipc_listener(dir.ipc_addr);
 	if(listener == NULL){
 		log_error("Can't set up ipc listener on self");
+		return 1;
+	}
+	struct sigaction rnit = { .sa_sigaction = reinit, .sa_flags = SA_SIGINFO };
+	if(sigaction(SIGUSR1, &rnit, NULL) == -1){
+		log_error("Error setting up SIGUSR1 signal handler: %s", strerror(errno));
 		return 1;
 	}
 	struct sigaction qit = { .sa_sigaction = quit, .sa_flags = SA_SIGINFO };
@@ -202,10 +252,10 @@ void remove_server_dir(void){
 }
 
 void deinit(void){
-	destroy_ipc_listener(&listener);
-	destroy_http_worker(&worker);
 	free_worker_config(&config);
 	remove_server_dir();
+	destroy_http_worker(&worker);
+	destroy_ipc_listener(&listener);
 }
 
 void print_usage(void){
