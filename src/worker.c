@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include "str/str.h"
-#include "ipc/ipc.h"
 #include "net/net.h"
 #include "config/config.h"
 
@@ -11,97 +10,14 @@ config_w config;
 struct {
 	str path;
 	str socket_path;
-	str ipc_addr;
 	str config_file;
 	str self;
 } dir;
-ipc_listener *listener;
 http_worker *worker;
 
 // remove these or something
 int secure = 0;
-str rewritesfile;
 
-
-// TODO: remove?
-// make int for errors?
-void handle_message(ipc_msg im){
-	log_debug("received message: [%d] (%d) %s", im.type, im.msg.len, im.msg.ptr);
-	switch(im.type){
-		case NONE: break;
-		case SOCKET:
-			// if(worker != NULL){
-			// 	destroy_http_worker(&worker);
-			// }
-			// int ssocket = strtou(im.msg);
-			// worker = setup_http_worker(ssocket, secure, certfile, keyfile);
-			// fds[1] = (struct pollfd){ .fd = worker->ssocket, .events = POLLIN };
-			break;
-		case REWRITES:
-			//int fsize = get_file_size(im.msg.ptr);
-			//int fd = open(im.msg.ptr, O_RDONLY | O_NONBLOCK);
-			//char *rewrites = mmap(NULL, fsize, PROT_READ, MAP_SHARED, fd, 0);
-			//if(rewrites == (void*)-1){
-			//	log_error("cant mmap rewrites: %s", strerror(errno));
-			//	return;
-			//}
-			//if(read_uri_rewrites(rewrites, fsize) != 0){
-			//	log_error("init: read_uri_rewrites: %s", strerror(errno));
-			//	return;
-			//}
-			//munmap(rewritesfile.ptr, fsize);
-			//close(fd);
-			break;
-		//case ROOT:
-		//	free_str(&rootdir);
-		//	rootdir = dup_str(im.msg);
-		//	break;
-		case BUNDLE:	// look into reinitializing the worker when receiving this
-			// free_str(&bundlefile);
-			// bundlefile = dup_str(im.msg);
-			// break;
-		case CERT:	// look into reinitializing the worker when receiving this
-			// free_str(&certfile);
-			// certfile = dup_str(im.msg);
-			// break;
-		case KEY:	// look into reinitializing the worker when receiving this
-			// free_str(&keyfile);
-			// keyfile = dup_str(im.msg);
-			// break;
-		case RESTART:
-			char *args[] = {"./worker.exe", listener->saddr.ptr, NULL};
-			execv("./worker.exe", args);
-			log_error("Cannot restart worker: %s", strerror(errno));
-			return;
-			break;
-		case RELOAD:
-			// re-reads config
-			// re-requests entire config;
-			break;
-		case HTTP:
-			// TODO: revise this
-			// log_info("received http signal");
-			// if(secure != 0){
-			// 	secure = 0;
-			// 	terminate_https(worker);
-			// }
-			break;
-		case HTTPS:
-			// TODO: revise this
-			// log_info("received https signal");
-			// if(secure == 0){
-			// 	secure = 1;
-			// 	setup_https(worker, certfile, keyfile);
-			// }
-			break;
-		case LOG:
-			break;
-		case UNLOG:
-			break;
-		default:
-			break;
-	}
-}
 
 void deinit(void);
 
@@ -168,11 +84,6 @@ int read_server_dir(str name){
 		log_error("No socket file in '%.*s'", dir.socket_path.len, dir.socket_path.ptr);
 		return 1;
 	}
-	dir.ipc_addr = dup_strs(dir.path, sstr("ipcserver"));
-	if(!file_exists(dir.ipc_addr.ptr)){
-		log_error("No IPC socket in '%.*s'", dir.ipc_addr.len, dir.ipc_addr.ptr);
-		return 1;
-	}
 	dir.config_file = dup_strs(dir.path, sstr("configfile"));
 	if(!file_exists(dir.config_file.ptr)){
 		log_error("No config file in '%.*s'", dir.config_file.len, dir.config_file.ptr);
@@ -215,11 +126,6 @@ int init(str name){
 		log_error("Error setting up worker server");
 		return 1;
 	}
-	listener = setup_ipc_listener(dir.ipc_addr);
-	if(listener == NULL){
-		log_error("Can't set up ipc listener on self");
-		return 1;
-	}
 	struct sigaction rnit = { .sa_sigaction = reinit, .sa_flags = SA_SIGINFO };
 	if(sigaction(SIGUSR1, &rnit, NULL) == -1){
 		log_error("Error setting up SIGUSR1 signal handler: %s", strerror(errno));
@@ -247,7 +153,6 @@ void remove_server_dir(void){
 		log_error("Error removing PID record for self in '%.*s': %s", dir.self.len, dir.self.ptr, strerror(errno));
 	}
 	free_str(&dir.self);
-	free_str(&dir.ipc_addr);
 	free_str(&dir.path);
 }
 
@@ -255,7 +160,6 @@ void deinit(void){
 	free_worker_config(&config);
 	remove_server_dir();
 	destroy_http_worker(&worker);
-	destroy_ipc_listener(&listener);
 }
 
 void print_usage(void){
@@ -351,7 +255,6 @@ finish_request:
 
 DEINIT:
 	deinit();
-	free_str(&rewritesfile);
 	log_info("dieing :(");
 
 	return return_value;

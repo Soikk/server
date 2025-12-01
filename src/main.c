@@ -1,32 +1,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/wait.h>
-//#include <time.h>
 #include <libgen.h>
 #include "str/str.h"
 #include "list/list.h"
 #include "net/net.h"
 #include "log/log.h"
-#include "ipc/ipc.h"
 #include "config/config.h"
 
-#define IPC_BACKLOG 15
 
 str name;
 str orig_config_file;
 struct {
 	str path;
 	str socket_file;
-	str ipc_addr;
 	str config_file;
 	str workers;
 } dir;
 config_m config;
 http_server *server;
-ipc_sender *sender;
 struct worker {
 	pid_t pid;
-	int wsocket;
 } *workers;
 
 
@@ -107,13 +101,6 @@ static int create_server_dir(str name){
 	}
 	dir.socket_file = dup_strs(dir.path, sstr("socket"));
 	dir.config_file = dup_strs(dir.path, sstr("configfile"));
-	dir.ipc_addr = dup_strs(dir.path, sstr("ipcserver"));
-	if(path_exists(dir.ipc_addr.ptr)){
-		if(remove(dir.ipc_addr.ptr) != 0){
-			log_error("Error removing existing IPC socket '%.*s': %s", dir.ipc_addr.len, dir.ipc_addr.ptr, strerror(errno));
-			return 1;
-		}
-	}
 	dir.workers = dup_strs(dir.path, sstr("workers/"));
 	if(!dir_exists(dir.workers.ptr)){
 		if(mkdir(dir.workers.ptr, 0777) != 0){
@@ -215,11 +202,6 @@ int init(char *configfile){
 		log_error("Unable to write socket to socket file");
 		return 1;
 	}
-	sender = setup_ipc_sender(dir.ipc_addr, IPC_BACKLOG);
-	if(sender == NULL){
-		log_error("Unable to set up IPC sender");
-		return 1;
-	}
 	init_list(workers);
 	struct sigaction rnit = { .sa_sigaction = reinit, .sa_flags = SA_SIGINFO };
 	if(sigaction(SIGUSR1, &rnit, NULL) == -1){
@@ -253,12 +235,6 @@ static void remove_server_dir(void){
 		}
 	}
 	free_str(&dir.workers);
-	if(file_exists(dir.ipc_addr.ptr)){
-		if(remove(dir.ipc_addr.ptr) != 0){
-			log_error("Error removing IPC socket '%.*s': %s", dir.ipc_addr.len, dir.ipc_addr.ptr, strerror(errno));
-		}
-	}
-	free_str(&dir.ipc_addr);
 	if(file_exists(dir.config_file.ptr)){
 		if(remove(dir.config_file.ptr) != 0){
 			log_error("Error removing config file in '%.*s': %s", dir.config_file.len, dir.config_file.ptr, strerror(errno));
@@ -283,7 +259,6 @@ void deinit(void){
 	free_master_config(&config);
 	remove_server_dir();
 	destroy_http_server(&server);
-	destroy_ipc_sender(&sender);
 	list_free(workers);
 }
 
@@ -355,24 +330,11 @@ int main(int argc, char *argv[]){
 					log_error("Cannot exec worker: %s", strerror(errno));
 					return 1;
 				}
-				struct worker w = { .pid = nw, .wsocket = accept(sender->ssocket, NULL, NULL) };
+				struct worker w = { .pid = nw };
 				list_push(workers, w);
 				break;
-			// case 's':
-			// 	for(int i = 0; i < list_size(workers); i++){
-			// 		send_ipc_message(workers[i].wsocket, HTTPS, sstr(""));
-			// 	}
-			// 	break;
-			// case 'S':
-			// 	for(int i = 0; i < list_size(workers); i++){
-			// 		send_ipc_message(workers[i].wsocket, HTTP, sstr(""));
-			// 	}
-			// 	break;
 			case 'r': case 'R':
 				kill(getpid(), SIGUSR1);
-				//for(int i = 0; i < list_size(workers); i++){
-				//	send_ipc_message(workers[i].wsocket, RESTART, sstr(""));
-				//}
 				break;
 			case 'l': case 'L':
 				printf("|-%3d workers working for us rn-|\n", list_size(workers));
@@ -393,7 +355,6 @@ int main(int argc, char *argv[]){
 				break;
 			case 'q': case 'Q':
 				while(list_size(workers) > 0){
-					shutdown(workers[0].wsocket, SHUT_RDWR);
 					kill(workers[0].pid, SIGTERM); // redo this PLEASE
 					waitpid(workers[0].pid, NULL, 0);
 				}
