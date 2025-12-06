@@ -25,9 +25,6 @@ void read_url_rewrites(str file){
 		off += rwt.output.query.len;
 		while(off < file.len && !charislinebreak(file.ptr[off++]));
 		if(rwt.pattern.len != 0 && rwt.output.path.len != 0){
-			rwt.pattern.ptr[rwt.pattern.len] = '\0';
-			rwt.output.path.ptr[rwt.output.path.len] = '\0';
-			rwt.output.query.ptr[rwt.output.query.len] = '\0';
 			list_push(rewrites, rwt);
 		}
 	}

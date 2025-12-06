@@ -38,6 +38,7 @@ http_server *setup_http_server(str port, int backlog){
 	hs->port = dup_str(port);
 	hs->backlog = backlog;
 	hs->ssocket = -1;
+	hs->csocket = -1;
 
 	int ec, val = 1;
 	struct addrinfo *res, hints = { .ai_family = AF_INET, .ai_socktype = SOCK_STREAM, .ai_flags = AI_PASSIVE };
@@ -51,8 +52,8 @@ http_server *setup_http_server(str port, int backlog){
 		goto error;
 	}
 
-	if(setsockopt(hs->ssocket, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val))){
-		log_error("server: SO_REUSEADDR: %s", strerror(errno));
+	if(setsockopt(hs->ssocket, SOL_SOCKET, SO_REUSEPORT, &val, sizeof(val))){
+		log_error("server: SO_REUSEPORT: %s", strerror(errno));
 		goto error;
 	}
 	
@@ -80,41 +81,15 @@ void destroy_http_server(http_server **hs){
 		free_str(&(*hs)->port);
 		(*hs)->backlog = 0;
 		close((*hs)->ssocket);
+		(*hs)->ssocket = -1;
+		close((*hs)->csocket);
+		(*hs)->csocket = -1;
 		free(*hs);
 		*hs = NULL;
 	}
 }
 
-http_worker *setup_http_worker(int ssocket, int secure, str certfile, str keyfile){
-	http_worker *hw = calloc(1, sizeof(http_worker));
-	hw->ssocket = ssocket;
-	hw->csocket = -1;
-	hw->secure = secure;
-
-	if(secure){
-		if(setup_https(hw, certfile, keyfile) != 0){
-			log_error("Setting up HTTPS");
-			terminate_https(hw);
-			destroy_http_worker(&hw);
-		}
-	}
-
-	return hw;
-}
-
-void destroy_http_worker(http_worker **hw){
-	if(*hw != NULL){
-		(*hw)->ssocket = -1;
-		close((*hw)->csocket);
-		(*hw)->csocket = -1;
-		(*hw)->secure = 0;
-		terminate_https(*hw);
-		free(*hw);
-		*hw = NULL;
-	}
-}
-
-int setup_https(http_worker *hw, str certfile, str keyfile){
+int setup_https(http_server *hs, str certfile, str keyfile){
 	if(certfile.len == 0){
 		log_error("Missing certificate file");
 		return 1;
@@ -124,113 +99,113 @@ int setup_https(http_worker *hw, str certfile, str keyfile){
 		return 1;
 	}
 
-	if(hw->ssl != NULL){
-		SSL_free(hw->ssl);
+	if(hs->ssl != NULL){
+		SSL_free(hs->ssl);
 	}
-	if(hw->ssl_ctx != NULL){
-		SSL_CTX_free(hw->ssl_ctx);
+	if(hs->ssl_ctx != NULL){
+		SSL_CTX_free(hs->ssl_ctx);
 	}
 
-	hw->ssl_ctx = SSL_CTX_new(TLS_server_method());
+	hs->ssl_ctx = SSL_CTX_new(TLS_server_method());
 	// need to compile openssl with ktls on for this (v) to work
-	SSL_CTX_set_options(hw->ssl_ctx, SSL_OP_ENABLE_KTLS | SSL_OP_IGNORE_UNEXPECTED_EOF);
-	if(hw->ssl_ctx == NULL){
+	SSL_CTX_set_options(hs->ssl_ctx, SSL_OP_ENABLE_KTLS | SSL_OP_IGNORE_UNEXPECTED_EOF);
+	if(hs->ssl_ctx == NULL){
 		return 1;
 	}
-	//SSL_CTX_set_verify(hw->ssl_ctx, SSL_VERIFY_PEER, NULL);
-	/*if(SSL_CTX_load_verify_locations(hw->ssl_ctx, "ssl/mkarchive.net/ca_bundle.crt", NULL) <= 0){
+	//SSL_CTX_set_verify(hs->ssl_ctx, SSL_VERIFY_PEER, NULL);
+	/*if(SSL_CTX_load_verify_locations(hs->ssl_ctx, "ssl/mkarchive.net/ca_bundle.crt", NULL) <= 0){
 		log_error("Verifying certificate locations");
 		return 1;
 	}*/
-	if(SSL_CTX_use_certificate_file(hw->ssl_ctx, certfile.ptr, SSL_FILETYPE_PEM) <= 0){
+	if(SSL_CTX_use_certificate_file(hs->ssl_ctx, certfile.ptr, SSL_FILETYPE_PEM) <= 0){
 		log_error("Error while trying to set up certificate file");
 		return 1;
 	}
-	if(SSL_CTX_use_PrivateKey_file(hw->ssl_ctx, keyfile.ptr, SSL_FILETYPE_PEM) <= 0 ){
+	if(SSL_CTX_use_PrivateKey_file(hs->ssl_ctx, keyfile.ptr, SSL_FILETYPE_PEM) <= 0 ){
 		log_error("Error while trying to set up key file");
 		return 1;
 	}
-	hw->ssl = SSL_new(hw->ssl_ctx);
-	if(hw->ssl == NULL){
+	hs->ssl = SSL_new(hs->ssl_ctx);
+	if(hs->ssl == NULL){
 		log_error("Creating SSL*");
 		return 1;
 	}
-	SSL_set_accept_state(hw->ssl);
-	hw->secure = 1;
+	SSL_set_accept_state(hs->ssl);
+	hs->secure = 1;
 
 	return 0;
 }
 
-void reset_https(http_worker *hw){
-	if(hw != NULL){
-		close(hw->csocket);
-		if(hw->ssl != NULL){
-			SSL_free(hw->ssl);
+void reset_https(http_server *hs){
+	if(hs != NULL){
+		close(hs->csocket);
+		if(hs->ssl != NULL){
+			SSL_free(hs->ssl);
 		}
-		hw->ssl = SSL_new(hw->ssl_ctx);
-		SSL_set_accept_state(hw->ssl);
+		hs->ssl = SSL_new(hs->ssl_ctx);
+		SSL_set_accept_state(hs->ssl);
 	}
 }
 
-void terminate_https(http_worker *hw){
-	if(hw != NULL){
-		hw->secure = 0;
-		if(hw->ssl != NULL){
-			SSL_free(hw->ssl);
-			hw->ssl = NULL;
+void terminate_https(http_server *hs){
+	if(hs != NULL){
+		hs->secure = 0;
+		if(hs->ssl != NULL){
+			SSL_free(hs->ssl);
+			hs->ssl = NULL;
 		}
-		if(hw->ssl_ctx != NULL){
-			SSL_CTX_free(hw->ssl_ctx);
-			hw->ssl_ctx = NULL;
+		if(hs->ssl_ctx != NULL){
+			SSL_CTX_free(hs->ssl_ctx);
+			hs->ssl_ctx = NULL;
 		}
 	}
 }
 
-int accept_connection(http_worker *hw, char ip[INET_ADDRSTRLEN]){
+int accept_connection(http_server *hs, char ip[INET_ADDRSTRLEN]){
 	struct sockaddr_storage caddr;
 	int casize = sizeof(caddr);
 	log_info("Waiting...");
-	if((hw->csocket = accept(hw->ssocket, (struct sockaddr *)&caddr, (socklen_t*)&casize)) == -1){
+	if((hs->csocket = accept(hs->ssocket, (struct sockaddr *)&caddr, (socklen_t*)&casize)) == -1){
 		log_error("accept_connection() -> accept(): %s", strerror(errno));
 		return -1;
 	}
 	log_info("accepted");
-	if(hw->secure){
-		int err = SSL_set_fd(hw->ssl, hw->csocket);
+	if(hs->secure){
+		int err = SSL_set_fd(hs->ssl, hs->csocket);
 		if(err != 1){
-			log_error("setting fd %d", hw->csocket);
-			return pleasesslgivemetheerror(SSL_get_error(hw->ssl, err));
+			log_error("setting fd %d", hs->csocket);
+			return pleasesslgivemetheerror(SSL_get_error(hs->ssl, err));
 		}
-		if((err = SSL_accept(hw->ssl)) != 1){
+		if((err = SSL_accept(hs->ssl)) != 1){
 			log_error("couldnt accept");
-			return pleasesslgivemetheerror(SSL_get_error(hw->ssl, err));
+			return pleasesslgivemetheerror(SSL_get_error(hs->ssl, err));
 		}
 	}
 	inet_ntop(caddr.ss_family, &(((struct sockaddr_in*)&caddr)->sin_addr), ip, INET_ADDRSTRLEN);
 	return 0;
 }
 
-static inline int worker_read(http_worker *hw, str *buf){
-	return hw->secure ?
-		SSL_read(hw->ssl, buf->ptr+buf->len, buf->cap-buf->len) :
-		recv(hw->csocket, buf->ptr+buf->len, buf->cap-buf->len, 0);
+static inline int server_read(http_server *hs, str *buf){
+	return hs->secure ?
+		SSL_read(hs->ssl, buf->ptr+buf->len, buf->cap-buf->len) :
+		recv(hs->csocket, buf->ptr+buf->len, buf->cap-buf->len, 0);
 }
 
-int receive_request(http_worker *hw, str *request){
+int receive_request(http_server *hs, str *request){
 	// SSL_has_pending can return 0 if you havent read any bytes yet (https://stackoverflow.com/questions/6616976/why-does-this-ssl-pending-call-always-return-zero)
-	struct pollfd pfd[1] = { {.fd = hw->csocket, .events = POLLIN } };
+	struct pollfd pfd[1] = { {.fd = hs->csocket, .events = POLLIN } };
 	while(poll(pfd, 1, 100)){
 		if(pfd[0].revents & POLLIN){
 			int rb = 0;
-			if(hw->secure){
-				if(SSL_has_pending(hw->ssl)){
-					rb = worker_read(hw, request);
+			if(hs->secure){
+				if(SSL_has_pending(hs->ssl)){
+					rb = server_read(hs, request);
 					if(rb == 0){
-						return pleasesslgivemetheerror(SSL_get_error(hw->ssl, rb));
+						return pleasesslgivemetheerror(SSL_get_error(hs->ssl, rb));
 					}
 				}
 			}else{
-				rb = worker_read(hw, request);
+				rb = server_read(hs, request);
 				if(rb == 0){
 					if(request->len == 0){
 						return -1;
@@ -461,10 +436,10 @@ url sanitize_url(str rurl){
 	return u;
 }
 
-static inline int worker_write(http_worker *hw, str buf){
-	return hw->secure ?
-		SSL_write(hw->ssl, buf.ptr, buf.len) :
-		send(hw->csocket, buf.ptr, buf.len, 0);
+static inline int server_write(http_server *hs, str buf){
+	return hs->secure ?
+		SSL_write(hs->ssl, buf.ptr, buf.len) :
+		send(hs->csocket, buf.ptr, buf.len, 0);
 }
 
 // use sendfile(2). reason:
@@ -472,7 +447,7 @@ static inline int worker_write(http_worker *hw, str buf){
 // Because this copying is done within the kernel, sendfile() is
 // more efficient than the combination of read(2) and write(2),
 // which would require transferring data to and from user space."
-void send_file(http_worker *hw, str filename){
+void send_file(http_server *hs, str filename){
 	log_info("requested '%.*s' -> ", filename.len, filename.ptr);
 	uint64_t fsize = get_file_size(filename.ptr);
 	if(fsize == 0){
@@ -497,10 +472,10 @@ void send_file(http_worker *hw, str filename){
 
 	str header = http_header_to_str(&hm);
 	free_str(&hm.headers[1].value);
-	int sent = worker_write(hw, header);
+	int sent = server_write(hs, header);
 	if(sent != header.len){
-		if(hw->secure){
-			pleasesslgivemetheerror(SSL_get_error(hw->ssl, sent));
+		if(hs->secure){
+			pleasesslgivemetheerror(SSL_get_error(hs->ssl, sent));
 		}else{
 			log_error("send_file: %s", strerror(errno));
 		}
@@ -521,14 +496,14 @@ void send_file(http_worker *hw, str filename){
 
 		// we're ignoring MAX_BODY_SIZE
 		str fuckcygwinineedsendfile = fd_to_nstr(fd, fsize);
-		sent = worker_write(hw, fuckcygwinineedsendfile);
+		sent = server_write(hs, fuckcygwinineedsendfile);
 		free_str(&fuckcygwinineedsendfile);
 
 		if(sent > 0){ fsize -= sent;
 		}else if(sent == 0){ break;
 		}else{
-			if(hw->secure){
-				pleasesslgivemetheerror(SSL_get_error(hw->ssl, sent));
+			if(hs->secure){
+				pleasesslgivemetheerror(SSL_get_error(hs->ssl, sent));
 			}else{
 				perror("send_file (fuck cygwin btw)");
 			}

@@ -9,16 +9,11 @@
 #include <errno.h>
 
 
-typedef struct config_m {
+typedef struct config {
 	str file;
 	str name;
 	str port;
 	int backlog;
-} config_m;
-
-typedef struct config_w {
-	str file;
-	str name;
 	str root;
 	str bundle;
 	str cert;
@@ -27,18 +22,15 @@ typedef struct config_w {
 	uint ipv4 : 1;
 	uint ipv6 : 1;
 	str *files;
-} config_w;
+} config;
 
 
-config_m master_config(char *filename);
-config_w worker_config(char *filename);
+config read_config(char *filename);
 
 str get_key(str file, str key);
 
-void free_master_config(config_m *conf);
-void free_worker_config(config_w *conf);
+void free_config(config *conf);
 
-void print_master_config(config_m conf);
-void print_worker_config(config_w conf);
+void print_config(config conf);
 
 #endif

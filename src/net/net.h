@@ -66,36 +66,23 @@ typedef struct http_server {
 	str port;
 	int backlog;
 	int ssocket;
-} http_server;
-
-typedef struct http_worker {
-	int ssocket;
 	int csocket;
 	int secure;
 	SSL_CTX *ssl_ctx;
 	SSL *ssl;
-} http_worker;
-
-#define MAX_RESPONSE_SIZE 0x0FFFFFFF
-#define MAX_BODY_SIZE (MAX_RESPONSE_SIZE - 0x0FFF)
-
-#define insert_header(hm, h) \
-	(hm).headers[(hm).hlen++] = (h)
+} http_server;
 
 
 http_server *setup_http_server(str port, int backlog);
 void destroy_http_server(http_server **hs);
 
-http_worker *setup_http_worker(int ssocket, int secure, str certfile, str keyfile);
-void destroy_http_worker(http_worker **hw);
+int setup_https(http_server*hs, str certfile, str keyfile);
+void reset_https(http_server *hs);
+void terminate_https(http_server *hs);
 
-int setup_https(http_worker *hw, str certfile, str keyfile);
-void reset_https(http_worker *hw);
-void terminate_https(http_worker *hw);
+int accept_connection(http_server *hs, char ip[INET_ADDRSTRLEN]);
 
-int accept_connection(http_worker *hw, char ip[INET_ADDRSTRLEN]);
-
-int receive_request(http_worker *hw, str *request);
+int receive_request(http_server *hs, str *request);
 
 str generate_resource(url resource, str rurl);
 
@@ -107,6 +94,6 @@ enum http_method get_http_method(str method);
 
 url sanitize_url(str rurl);
 
-void send_file(http_worker *hw, str filename);
+void send_file(http_server *hs, str filename);
 
 #endif

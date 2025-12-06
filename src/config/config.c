@@ -66,13 +66,14 @@ static void rotate_logs(str logs){
 	read_logs(logs);
 }
 
-config_m master_config(char *filename){
-	config_m conf = {0};
+config read_config(char *filename){
+	config conf = {0};
 	conf.file = map_file(filename);
 	if(conf.file.ptr == NULL){
 		log_error("Unable to open config file '%s'", filename);
 		return conf;
 	}
+	init_nlist(conf.files);
 	int off = 0;
 	while(off < conf.file.len){
 		while(off < conf.file.len && charisspace(conf.file.ptr[off])) off++;
@@ -97,59 +98,6 @@ config_m master_config(char *filename){
 			str val = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += val.len;
 			conf.backlog = (int)strtou(val);
-		}else if(streq(key, sstr("logs"))){
-			str val = sread_delim_f(conf.file.ptr + off, charisspace, true);
-			off += val.len;
-			str logs;
-			if(val.ptr[0] != '{'){
-				str logfile = dup_str(val);
-				logs = file_to_str(logfile.ptr);
-				free_str(&logfile);
-			}else{
-				logs = read_delim(conf.file.ptr + off, '}');
-				off += logs.len;
-			}
-			rotate_logs(logs);
-			free_str(&logs);
-		}else if(streq(key, sstr("worker"))){
-			int bcount = 1;
-			while(off < conf.file.len && bcount > 0){
-				if(conf.file.ptr[off] == '{') bcount++;
-				if(conf.file.ptr[off] == '}') bcount--;
-				off++;
-			}
-		}else if(key.len != 0){
-			log_warn("Unexpected entry in configuration: '%.*s'", key.len, key.ptr);
-		}
-		while(off < conf.file.len && !charislinebreak(conf.file.ptr[off++]));
-	};
-
-	return conf;
-}
-
-config_w worker_config(char *filename){
-	config_w conf = {0};
-	conf.file = map_file(filename);
-	if(conf.file.ptr == NULL){
-		log_error("Unable to open config file '%s'", filename);
-		return conf;
-	}
-	init_nlist(conf.files);
-	int off = 0;
-	while(off < conf.file.len){
-		while(off < conf.file.len && charisspace(conf.file.ptr[off])) off++;
-		if(conf.file.ptr[off] == '#'){
-			while(off < conf.file.len && !charislinebreak(conf.file.ptr[off++]));
-			continue;
-		}
-		str key = sread_delim_f(conf.file.ptr + off, charisspace, true);
-		off += key.len;
-		while(off < conf.file.len && charisspace(conf.file.ptr[off]) && !charislinebreak(conf.file.ptr[off])) off++;
-
-		if(streq(key, sstr("name"))){
-			conf.name = sread_delim_f(conf.file.ptr + off, charisspace, true);
-			off += conf.name.len;
-			conf.file.ptr[off] = '\0';
 		}else if(streq(key, sstr("root"))){
 			conf.root = sread_delim_f(conf.file.ptr + off, charisspace, true);
 			off += conf.root.len;
@@ -243,15 +191,10 @@ str get_key(str file, str key){
 	return (str){0};
 }
 
-void free_master_config(config_m *conf){
+void free_config(config *conf){
 	conf->name = (str){0};
 	conf->port = (str){0};
 	conf->backlog = 0;
-	unmap_file(&conf->file);
-}
-
-void free_worker_config(config_w *conf){
-	conf->name = (str){0};
 	conf->root = (str){0};
 	conf->bundle = (str){0};
 	conf->cert = (str){0};
@@ -268,33 +211,12 @@ void free_worker_config(config_w *conf){
 	unmap_file(&conf->file);
 }
 
-void print_master_config(config_m conf){
+void print_config(config conf){
 	printf(
-		"MASTER CONFIGURATION:\n"
+		"CONFIGURATION:\n"
 		"\t- name:    %.*s\n"
 		"\t- port:    %.*s\n"
 		"\t- backlog: %d\n"
-		"\t- logs:   {\n",
-		conf.name.len, conf.name.ptr,
-		conf.port.len, conf.port.ptr,
-		conf.backlog
-	);
-	for(int i = 0; i < LOG_LEVEL_COUNT; i++){
-		switch(i){
-			case LOG_DEBUG: printf("\t\tDEBUG:\t"); break;
-			case LOG_INFO: printf("\t\tINFO:\t"); break;
-			case LOG_WARN: printf("\t\tWARN:\t"); break;
-			case LOG_ERROR: printf("\t\tERROR:\t"); break;
-		}
-		printf("%d files%s\n", log_get_files(i), log_get_stderr(i) ? " + stderr" : "");
-	}
-	printf("\t}\n");
-}
-
-void print_worker_config(config_w conf){
-	printf(
-		"WORKER CONFIGURATION:\n"
-		"\t- name:    %.*s\n"
 		"\t- root:    %.*s\n"
 		"\t- bundle:  %.*s\n"
 		"\t- cert:    %.*s\n"
@@ -303,6 +225,8 @@ void print_worker_config(config_w conf){
 		"\t- ipv4:    %s\n"
 		"\t- ipv6:    %s\n",
 		conf.name.len, conf.name.ptr,
+		conf.port.len, conf.name.ptr,
+		conf.backlog,
 		conf.root.len, conf.root.ptr,
 		conf.bundle.len, conf.bundle.ptr,
 		conf.cert.len, conf.cert.ptr,
@@ -325,4 +249,3 @@ void print_worker_config(config_w conf){
 	}
 	printf("\t}\n");
 }
-
