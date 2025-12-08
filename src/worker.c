@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/mman.h>
 #include "str/str.h"
 #include "net/net.h"
 #include "config/config.h"

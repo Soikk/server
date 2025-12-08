@@ -12,7 +12,8 @@ else
 	RUNCMD = ./server.exe
 endif
 
-OBJS = $(addprefix $(OBJDIR)/, bit.o files.o str.o log.o list.o crc64.o net.o mime.o rewrites.o config.o)
+MAINOBJS = $(addprefix $(OBJDIR)/, bit.o list.o files.o str.o log.o mime.o rewrites.o config.o)
+WORKEROBJS = $(addprefix $(OBJDIR)/, bit.o list.o files.o str.o log.o mime.o rewrites.o config.o net.o)
 
 INCL = -I$(LIBDIR) -I$(SRCDIR)
 
@@ -20,11 +21,11 @@ INCL = -I$(LIBDIR) -I$(SRCDIR)
 
 all: server.exe worker.exe
 
-server.exe: $(SRCDIR)/main.c $(OBJS)
-	$(CC) $< $(OBJS) $(INCL) $(CFLAGS) -o server.exe $(LDFLAGS)
+server.exe: $(SRCDIR)/main.c $(MAINOBJS)
+	$(CC) $< $(MAINOBJS) $(INCL) $(CFLAGS) -o server.exe $(LDFLAGS)
 
-worker.exe: $(SRCDIR)/worker.c $(OBJS)
-	$(CC) $< $(OBJS) $(INCL) $(CFLAGS) -o worker.exe $(LDFLAGS)
+worker.exe: $(SRCDIR)/worker.c $(WORKEROBJS)
+	$(CC) $< $(WORKEROBJS) $(INCL) $(CFLAGS) -o worker.exe $(LDFLAGS)
 
 $(OBJDIR)/%.o: $(SRCDIR)/%/*.c $(SRCDIR)/%/*.h
 	$(CC) -c $(SRCDIR)/$*/$*.c $(INCL) $(CFLAGS) -o $(OBJDIR)/$*.o $(LDFLAGS)

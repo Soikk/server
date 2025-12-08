@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
-#include <libgen.h>
+#include <errno.h>
 #include <sys/wait.h>
 #include "str/str.h"
 #include "log/log.h"
