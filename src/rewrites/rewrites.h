@@ -24,6 +24,9 @@ str fill_blueprint(str bp, str tokens[9]);
 url url_rewrite(str url, rewrite rwt);
 url url_check(str url);
 
+void free_url(url *u);
+void free_rewrite(rewrite *r);
+
 void print_url_rewrites(void);
 
 #endif

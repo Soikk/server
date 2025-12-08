@@ -143,6 +143,16 @@ url url_check(str rurl){
 	return (url){0};
 }
 
+void free_url(url *u){
+	free_str(&u->path);
+	free_str(&u->query);
+}
+
+void free_rewrite(rewrite *r){
+	free_str(&r->pattern);
+	free_url(&r->output);
+}
+
 void print_url_rewrites(void){
 	int size = list_size(rewrites);
 	printf("\t- rewrites:{\n");
