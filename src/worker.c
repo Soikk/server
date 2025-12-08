@@ -14,7 +14,7 @@ struct {
 config conf;
 http_server *server;
 
-// remove these or something
+// remove this or something
 int secure = 0;
 
 
@@ -151,42 +151,34 @@ int main(int argc, char **argv){
 		return 1;
 	}
 
-	int return_value = 0;
+	int ret = 0;
 
 	if(init(dsstr(argv[1])) != 0){
-		return_value = 1;
+		ret = 1;
 		goto DEINIT;
 	}
 	log_info("init'd");
 
-	//bool end = false;
 	str request = {.cap = 8192, .len = 0, .ptr = alloca(8192)};
-
+	// TODO: lookup shutdown() for sockets
 	while(1){
 		char cip[INET_ADDRSTRLEN] = {0};
-		return_value = accept_connection(server, cip);
-		switch(return_value){
-			case -1: // couldnt accept, do something ig
-				continue;
-			case SSL_ERROR_SSL:
-				reset_https(server);
-				log_info("continuing\n");
-				continue;
+		ret = accept_connection(server, cip);
+		if(ret != 0){ // couldnt accept, do something ig
+			if(ret == SSL_ERROR_SSL) reset_https(server);
+			log_info("continuing\n");
+			continue;
 		}
 		log_info("socket %d accepted with ip %s", server->csocket, cip);
-		return_value = receive_request(server, &request);
-		log_debug("received %d from receive_request", return_value);
-		switch(return_value){
-			case -1: // couldnt accept, do something ig
-				goto finish_request;
-				break;
-			case SSL_ERROR_SSL:
-				reset_https(server);
-				log_info("continuing\n");
-				continue;
+		ret = receive_request(server, &request);
+		log_debug("received %d from receive_request", ret);
+		if(ret <= 0){
+			if(ret == SSL_ERROR_SSL) reset_https(server);
+			log_info("continuing\n");
+			goto finish_request;
 		}
 
-		printf("%d: '%.*s'\n", request.len, request.len, request.ptr);
+		log_debug("%d: '%.*s'\n", request.len, request.len, request.ptr);
 
 		struct http_message hm = {0};
 		build_http_message(request.ptr, request.len, &hm);
@@ -194,7 +186,6 @@ int main(int argc, char **argv){
 		url surl = sanitize_url(hm.url);
 		log_info("uri after: '%.*s' ? '%.*s'", surl.path.len, surl.path.ptr, surl.query.len, surl.query.ptr);
 		enum http_method method = get_http_method(hm.method);
-
 		switch(method){
 			case GET:
 				str resource = generate_resource(surl, hm.url);
@@ -215,9 +206,7 @@ int main(int argc, char **argv){
 		}
 
 finish_request:
-		free_str(&surl.path);
-		free_str(&surl.query);
-		log_debug("query freed");
+		free_url(&surl);
 		request.len = 0;
 
 		if(server->secure){
@@ -232,9 +221,9 @@ finish_request:
 
 DEINIT:
 	deinit();
-	log_info("dieing :(");
+	log_info("Worker %d dieing :(", getpid());
 
-	return return_value;
+	return ret;
 }
 
 /*

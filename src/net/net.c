@@ -166,22 +166,22 @@ int accept_connection(http_server *hs, char ip[INET_ADDRSTRLEN]){
 	int casize = sizeof(caddr);
 	log_info("Waiting...");
 	if((hs->csocket = accept(hs->ssocket, (struct sockaddr *)&caddr, (socklen_t*)&casize)) == -1){
-		log_error("accept_connection() -> accept(): %s", strerror(errno));
+		log_error("Couldnt't accept connection: %s", strerror(errno));
 		return -1;
 	}
+	inet_ntop(caddr.ss_family, &(((struct sockaddr_in*)&caddr)->sin_addr), ip, INET_ADDRSTRLEN);
 	log_info("accepted");
 	if(hs->secure){
-		int err = SSL_set_fd(hs->ssl, hs->csocket);
-		if(err != 1){
-			log_error("setting fd %d", hs->csocket);
+		int err = 0;
+		if((err = SSL_set_fd(hs->ssl, hs->csocket)) != 1){
+			log_error("Error setting SSL's fd %d", hs->csocket);
 			return pleasesslgivemetheerror(SSL_get_error(hs->ssl, err));
 		}
 		if((err = SSL_accept(hs->ssl)) != 1){
-			log_error("couldnt accept");
+			log_error("SSL couldnt accept");
 			return pleasesslgivemetheerror(SSL_get_error(hs->ssl, err));
 		}
 	}
-	inet_ntop(caddr.ss_family, &(((struct sockaddr_in*)&caddr)->sin_addr), ip, INET_ADDRSTRLEN);
 	return 0;
 }
 
@@ -207,12 +207,8 @@ int receive_request(http_server *hs, str *request){
 			}else{
 				rb = server_read(hs, request);
 				if(rb == 0){
-					if(request->len == 0){
-						return -1;
-					}
-					return 0;
-				}
-				if(rb < 0){
+					return request->len;
+				}else if(rb < 0){
 					return rb;
 				}
 			}
@@ -228,7 +224,7 @@ int receive_request(http_server *hs, str *request){
 			log_error("Socket returned revents '%d'", pfd[0].revents);
 		}
 	}
-	return 0;
+	return request->len;
 }
 
 str generate_resource(url resource, str rurl){

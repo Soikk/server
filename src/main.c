@@ -221,25 +221,6 @@ int main(int argc, char *argv[]){
 	system("curl -s http://ipinfo.io/ip && echo");
 #endif
 
-
-/*
-	sqlite3 *db = setupDatabase("src/db/db.db");
-	if(db == NULL){
-		fprintf(stderr, "error setting up database\n");
-		return 1;
-	}
-
-	if(getNEntries("archive") != getCount(db, FILE_TABLE)){
-		int n = getNEntries("archive");
-		char **entries = getFiles("archive"); // getFiles deprecated btw
-		for(int i = 0; i < n; ++i){
-			insertName(db, FILE_TABLE, entries[i]);
-		}
-		printf("%d, %d\n", getNEntries("archive"), getCount(db, FILE_TABLE));
-	}
-*/
-
-	// TODO: lookup shutdown() for sockets
 	printf("press h for help\n");
 	bool end = false;
 	while(!end){
