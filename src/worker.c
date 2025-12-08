@@ -203,9 +203,9 @@ int main(int argc, char **argv){
 			default:
 				break;
 		}
+		free_url(&surl);
 
 finish_request:
-		free_url(&surl);
 		request.len = 0;
 
 		if(server->secure){
