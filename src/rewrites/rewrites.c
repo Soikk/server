@@ -62,12 +62,11 @@ int check_pattern(str text, str pattern, str tokens[9]){
 }
 
 str fill_blueprint(str bp, str tokens[9]){
-	str r = {0};
 	int rlen = 0;
 	for(int i = 0; i < bp.len; i++, rlen++){
 		if(bp.ptr[i] == '$') rlen += tokens[bp.ptr[++i]-'1'].len-1;
 	}
-	r.ptr = calloc(rlen+1, sizeof(char));
+	str r = dnstr(rlen);
 	if(r.ptr == NULL){
 		return r;
 	}

@@ -397,8 +397,7 @@ static uint64_t http_len(struct http_message *hm){
 }*/
 
 static str http_header_to_str(struct http_message *hm){
-	str s = {0};
-	s.ptr = calloc(http_len(hm) + 1, sizeof(char));
+	str s = dnstr(http_len(hm));
 	copy_strs(s, hm->method, sstr(" "), hm->url, sstr(" "), hm->req_ver, sstr("\r\n"));
 	for(int i = 0; i < hm->hlen; i++){
 		copy_strs(s, hm->headers[i].name, sstr(": "), hm->headers[i].value, sstr("\r\n"));
