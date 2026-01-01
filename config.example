@@ -1,6 +1,6 @@
 # lines that start with # are skipped
 name		website.com	# name of the server. the # isnt really needed here as the config reader skips to the next line once it reads the needed value
-port		80			# port the server will be running on
+port		443			# port the server will be running on
 backlog		15			# backlog for the socket
 logs {
 	# adds logging (for all processes) to specified files, and can turn logging to stderr off (0) or on (not 0)
@@ -16,8 +16,8 @@ root	/home/user/server/	# where the server will look for files, basically files 
 bundle	/ca/bundle/location	# location of ca bundle
 cert	ssl/cert.pem	# location of certificate
 key		ssl/key.pem		#location of private key
-http	# turns https off
-# https	# turns https on
+# http	# turns https off
+https	# turns https on
 ipv4	# ipv4 enabled
 ipv6	# ipv6 enabled
 rewrites {

@@ -98,7 +98,6 @@ int setup_https(http_server *hs, str certfile, str keyfile){
 		log_error("Missing private key file");
 		return 1;
 	}
-
 	if(hs->ssl != NULL){
 		SSL_free(hs->ssl);
 	}
@@ -192,18 +191,20 @@ static inline int server_read(http_server *hs, str *buf){
 }
 
 int receive_request(http_server *hs, str *request){
-	// SSL_has_pending can return 0 if you havent read any bytes yet (https://stackoverflow.com/questions/6616976/why-does-this-ssl-pending-call-always-return-zero)
 	struct pollfd pfd[1] = { {.fd = hs->csocket, .events = POLLIN } };
 	while(poll(pfd, 1, 100)){
 		if(pfd[0].revents & POLLIN){
 			int rb = 0;
 			if(hs->secure){
-				if(SSL_has_pending(hs->ssl)){
+				// SSL_has_pending can return 0 if you havent read any bytes yet
+				// https://stackoverflow.com/questions/6616976/why-does-this-ssl-pending-call-always-return-zero
+				// so we must perform a read first to advance the state machine
+				do{
 					rb = server_read(hs, request);
 					if(rb == 0){
 						return pleasesslgivemetheerror(SSL_get_error(hs->ssl, rb));
 					}
-				}
+				}while(SSL_has_pending(hs->ssl));
 			}else{
 				rb = server_read(hs, request);
 				if(rb == 0){

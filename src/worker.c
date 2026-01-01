@@ -115,6 +115,12 @@ int init(str name){
 		log_error("Error setting up worker server");
 		return 1;
 	}
+	if(conf.secure){
+		if(setup_https(server, conf.cert, conf.key)){
+			log_error("Error setting up HTTPS in the server");
+			return 1;
+		}
+	}
 	struct sigaction rnit = { .sa_sigaction = reinit, .sa_flags = SA_SIGINFO };
 	if(sigaction(SIGUSR1, &rnit, NULL) == -1){
 		log_error("Error setting up SIGUSR1 signal handler: %s", strerror(errno));
