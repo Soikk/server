@@ -4,10 +4,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-//#include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
-//#include <netinet/in.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <sys/un.h>
 #include <ifaddrs.h>
 #include <unistd.h>
 #include <signal.h>
@@ -80,7 +81,7 @@ int setup_https(http_server*hs, str certfile, str keyfile);
 void reset_https(http_server *hs);
 void terminate_https(http_server *hs);
 
-int accept_connection(http_server *hs, char ip[INET_ADDRSTRLEN]);
+int accept_connection(http_server *hs);
 
 int receive_request(http_server *hs, str *request);
 

@@ -167,14 +167,13 @@ int main(int argc, char **argv){
 	str request = {.cap = 8192, .len = 0, .ptr = alloca(8192)};
 	// TODO: lookup shutdown() for sockets
 	while(1){
-		char cip[INET_ADDRSTRLEN] = {0};
-		ret = accept_connection(server, cip);
+		ret = accept_connection(server);
 		if(ret != 0){ // couldnt accept, do something ig
 			if(ret == SSL_ERROR_SSL) reset_https(server);
 			log_info("continuing\n");
 			continue;
 		}
-		log_info("socket %d accepted with ip %s", server->csocket, cip);
+		log_info("socket %d accepted", server->csocket);
 		ret = receive_request(server, &request);
 		log_debug("received %d from receive_request", ret);
 		if(ret <= 0){

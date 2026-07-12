@@ -56,7 +56,7 @@ http_server *setup_http_server(str port, int backlog){
 		log_error("server: SO_REUSEPORT: %s", strerror(errno));
 		goto error;
 	}
-	
+
 	if(bind(hs->ssocket, res->ai_addr, res->ai_addrlen) == -1){
 		log_error("server: bind: %s", strerror(errno));
 		goto error;
@@ -160,15 +160,13 @@ void terminate_https(http_server *hs){
 	}
 }
 
-int accept_connection(http_server *hs, char ip[INET_ADDRSTRLEN]){
-	struct sockaddr_storage caddr;
-	int casize = sizeof(caddr);
+int accept_connection(http_server *hs){
+	sockaddr sa;
 	log_info("Waiting...");
-	if((hs->csocket = accept(hs->ssocket, (struct sockaddr *)&caddr, (socklen_t*)&casize)) == -1){
+	if((hs->csocket = accept(hs->ssocket, (struct sockaddr*)&sa, NULL)) == -1){
 		log_error("Couldnt't accept connection: %s", strerror(errno));
 		return -1;
 	}
-	inet_ntop(caddr.ss_family, &(((struct sockaddr_in*)&caddr)->sin_addr), ip, INET_ADDRSTRLEN);
 	log_info("accepted");
 	if(hs->secure){
 		int err = 0;
