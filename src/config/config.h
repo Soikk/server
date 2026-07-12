@@ -26,9 +26,7 @@ typedef struct config {
 
 
 config read_config(char *filename);
-
 str get_key(str file, str key);
-
 void free_config(config *conf);
 
 void print_config(config conf);
